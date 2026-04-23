@@ -4,6 +4,8 @@ export type CanvasSnapshot = {
   imgLayer: unknown;
   textLayer: unknown;
   drawLayer: unknown;
+  /** Ширина холста при сохранении (все три слоя совпадают). Опционально для старых записей. */
+  canvasWidth?: number;
   canvasHeight: number;
   savedAt: string;
 };

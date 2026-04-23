@@ -51,20 +51,24 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const [isImageActionsOpen, setIsImageActionsOpen] = useState(false);
   const [isImageDeleteMode, setIsImageDeleteMode] = useState(false);
   const [canvasHeight, setCanvasHeight] = useState(600);
-  const [isLibrarySaving, setIsLibrarySaving] = useState(false);
-  const [librarySaveMessage, setLibrarySaveMessage] = useState<string | null>(null);
+  const [isSavingToDrawings, setIsSavingToDrawings] = useState(false);
 
   const buildDocumentSnapshot = (
     imgCanvas: fabric.Canvas,
     textCanvas: fabric.Canvas,
     drawCanvas: fabric.Canvas,
-  ): CanvasSnapshot => ({
-    imgLayer: imgCanvas.toJSON(),
-    textLayer: textCanvas.toJSON(),
-    drawLayer: drawCanvas.toJSON(),
-    canvasHeight: drawCanvas.getHeight(),
-    savedAt: new Date().toISOString(),
-  });
+  ): CanvasSnapshot => {
+    const width = drawCanvas.getWidth();
+    const height = drawCanvas.getHeight();
+    return {
+      imgLayer: imgCanvas.toJSON(),
+      textLayer: textCanvas.toJSON(),
+      drawLayer: drawCanvas.toJSON(),
+      canvasWidth: width,
+      canvasHeight: height,
+      savedAt: new Date().toISOString(),
+    };
+  };
 
   const setTextEditingVisuals = (text: fabric.IText) => {
     text.set({
@@ -380,14 +384,18 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         }
 
         const currentWidth = drawCanvas.getWidth();
+        const restoredWidth =
+          typeof snapshot.canvasWidth === "number"
+            ? snapshot.canvasWidth
+            : currentWidth;
         const restoredHeight =
           typeof snapshot.canvasHeight === "number"
             ? snapshot.canvasHeight
             : drawCanvas.getHeight();
 
-        imgCanvas.setDimensions({ width: currentWidth, height: restoredHeight });
-        textCanvas.setDimensions({ width: currentWidth, height: restoredHeight });
-        drawCanvas.setDimensions({ width: currentWidth, height: restoredHeight });
+        imgCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
+        textCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
+        drawCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
         setCanvasHeight(restoredHeight);
 
         await Promise.resolve(
@@ -555,7 +563,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     fileInputRef.current?.click();
   };
 
-  const saveToLibrary = async () => {
+  const saveToSupabase = async () => {
     const imgCanvas = imgCanvasRef.current;
     const textCanvas = textCanvasRef.current;
     const drawCanvas = drawCanvasRef.current;
@@ -563,22 +571,22 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return;
     }
 
-    setLibrarySaveMessage(null);
-    setIsLibrarySaving(true);
+    setIsSavingToDrawings(true);
     try {
-      const snapshot = buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
+      const content = buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
       await createDrawing({
         name: "MyBoard",
-        content: snapshot,
+        content,
         roomId: "room-1",
       });
-      setLibrarySaveMessage("Сохранено в библиотеку");
+      console.log("Работа сохранена в базу!");
+      alert("Работа сохранена в базу!");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Неизвестная ошибка";
-      setLibrarySaveMessage(`Ошибка сохранения: ${message}`);
+      console.warn("saveToSupabase failed:", error);
+      alert(`Ошибка сохранения: ${message}`);
     } finally {
-      setIsLibrarySaving(false);
-      window.setTimeout(() => setLibrarySaveMessage(null), 2500);
+      setIsSavingToDrawings(false);
     }
   };
 
@@ -853,13 +861,13 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
             type="button"
             onClick={() => {
               clearTextEditingVisuals();
-              void saveToLibrary();
+              void saveToSupabase();
             }}
-            disabled={isLibrarySaving}
+            disabled={isSavingToDrawings}
             className="rounded-md bg-zinc-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-            title="Сохранить в библиотеку"
+            title="Сохранить"
           >
-            {isLibrarySaving ? "Сохранение..." : "Сохранить"}
+            {isSavingToDrawings ? "Сохранение..." : "Сохранить"}
           </button>
           <button
             type="button"
@@ -872,11 +880,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           >
             Экспорт в PNG
           </button>
-          {librarySaveMessage ? (
-            <span className="text-xs font-medium text-zinc-600">
-              {librarySaveMessage}
-            </span>
-          ) : null}
         </div>
       </header>
 
