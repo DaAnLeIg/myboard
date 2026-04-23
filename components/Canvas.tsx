@@ -1,6 +1,7 @@
 "use client";
 
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import * as fabric from "fabric";
 import { supabase } from "../utils/supabaseClient";
 import {
@@ -123,6 +124,81 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     textCanvas.discardActiveObject();
     textCanvas.requestRenderAll();
   };
+
+  const searchParams = useSearchParams();
+  const idFromUrl = searchParams.get("id") ?? searchParams.get("drawing");
+  /** Сначала выбор из списка, иначе — открытие по ссылке `?id=` / `?drawing=`. */
+  const drawingIdToLoad = selectedDrawingId ?? idFromUrl ?? null;
+
+  /**
+   * Восстанавливает три слоя из сохранённого JSON: изображения, текст, штрихи.
+   */
+  const loadDrawing = useCallback(
+    async (data: CanvasSnapshot, opts?: { isCancelled?: () => boolean }) => {
+      const isCancelled = opts?.isCancelled ?? (() => false);
+      const imgCanvas = imgCanvasRef.current;
+      const textCanvas = textCanvasRef.current;
+      const drawCanvas = drawCanvasRef.current;
+      if (!imgCanvas || !textCanvas || !drawCanvas) {
+        return;
+      }
+
+      const snapshot = data;
+      const currentWidth = drawCanvas.getWidth();
+      const restoredWidth =
+        typeof snapshot.canvasWidth === "number" ? snapshot.canvasWidth : currentWidth;
+      const restoredHeight =
+        typeof snapshot.canvasHeight === "number"
+          ? snapshot.canvasHeight
+          : drawCanvas.getHeight();
+
+      imgCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
+      textCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
+      drawCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
+      setCanvasHeight(restoredHeight);
+
+      if (isCancelled()) {
+        return;
+      }
+
+      await Promise.resolve(
+        imgCanvas.loadFromJSON((snapshot.imgLayer ?? { objects: [] }) as never),
+      );
+      if (isCancelled()) {
+        return;
+      }
+      await Promise.resolve(
+        textCanvas.loadFromJSON((snapshot.textLayer ?? { objects: [] }) as never),
+      );
+      if (isCancelled()) {
+        return;
+      }
+      await Promise.resolve(
+        drawCanvas.loadFromJSON((snapshot.drawLayer ?? { objects: [] }) as never),
+      );
+      if (isCancelled()) {
+        return;
+      }
+
+      imgCanvas.renderAll();
+      textCanvas.renderAll();
+      drawCanvas.renderAll();
+
+      const images = imgCanvas
+        .getObjects()
+        .filter((obj): obj is fabric.FabricImage => obj instanceof fabric.FabricImage);
+      const texts = textCanvas
+        .getObjects()
+        .filter((obj): obj is fabric.IText => obj instanceof fabric.IText);
+      const lastImage = images.length > 0 ? images[images.length - 1] : null;
+      const lastText = texts.length > 0 ? texts[texts.length - 1] : null;
+
+      lastInsertedImageRef.current = lastImage;
+      lastTextObjectRef.current = lastText;
+      recalcDocumentHeightRef.current?.();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (
@@ -362,7 +438,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   }, []);
 
   useEffect(() => {
-    if (!selectedDrawingId) {
+    if (!drawingIdToLoad) {
       return;
     }
 
@@ -374,60 +450,18 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     }
 
     let isCancelled = false;
-    const loadSelectedDrawing = async () => {
+    const run = async () => {
       try {
         isLoadingDrawingRef.current = true;
-        const drawing = await getDrawingById(selectedDrawingId);
+        const drawing = await getDrawingById(drawingIdToLoad);
+        if (isCancelled) {
+          return;
+        }
         const snapshot = drawing.content;
         if (!snapshot) {
           return;
         }
-
-        const currentWidth = drawCanvas.getWidth();
-        const restoredWidth =
-          typeof snapshot.canvasWidth === "number"
-            ? snapshot.canvasWidth
-            : currentWidth;
-        const restoredHeight =
-          typeof snapshot.canvasHeight === "number"
-            ? snapshot.canvasHeight
-            : drawCanvas.getHeight();
-
-        imgCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
-        textCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
-        drawCanvas.setDimensions({ width: restoredWidth, height: restoredHeight });
-        setCanvasHeight(restoredHeight);
-
-        await Promise.resolve(
-          imgCanvas.loadFromJSON((snapshot.imgLayer ?? { objects: [] }) as never),
-        );
-        await Promise.resolve(
-          textCanvas.loadFromJSON((snapshot.textLayer ?? { objects: [] }) as never),
-        );
-        await Promise.resolve(
-          drawCanvas.loadFromJSON((snapshot.drawLayer ?? { objects: [] }) as never),
-        );
-
-        imgCanvas.renderAll();
-        textCanvas.renderAll();
-        drawCanvas.renderAll();
-
-        if (isCancelled) {
-          return;
-        }
-
-        const images = imgCanvas
-          .getObjects()
-          .filter((obj): obj is fabric.FabricImage => obj instanceof fabric.FabricImage);
-        const texts = textCanvas
-          .getObjects()
-          .filter((obj): obj is fabric.IText => obj instanceof fabric.IText);
-        const lastImage = images.length > 0 ? images[images.length - 1] : null;
-        const lastText = texts.length > 0 ? texts[texts.length - 1] : null;
-
-        lastInsertedImageRef.current = lastImage;
-        lastTextObjectRef.current = lastText;
-        recalcDocumentHeightRef.current?.();
+        await loadDrawing(snapshot, { isCancelled: () => isCancelled });
       } catch (error) {
         console.warn("Failed to load drawing:", error);
       } finally {
@@ -435,11 +469,11 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       }
     };
 
-    void loadSelectedDrawing();
+    void run();
     return () => {
       isCancelled = true;
     };
-  }, [selectedDrawingId]);
+  }, [drawingIdToLoad, loadDrawing]);
 
   useEffect(() => {
     isImageDeleteModeRef.current = isImageDeleteMode;
