@@ -34,6 +34,60 @@ const SUPABASE_DOCUMENT_ID = "default";
 const SAVE_DEBOUNCE_MS = 800;
 const SNAPSHOT_IMAGE_PROPS: string[] = [STORAGE_PATH_KEY, "crossOrigin"];
 
+void (function registerImageStorageKey() {
+  const C = fabric.FabricImage as unknown as { customProperties: string[] };
+  if (!C.customProperties) {
+    C.customProperties = [];
+  }
+  if (!C.customProperties.includes(STORAGE_PATH_KEY)) {
+    C.customProperties = [...C.customProperties, STORAGE_PATH_KEY];
+  }
+})();
+
+function assertImageJsonUsesRemoteSrcOnly(imgLayer: { objects?: unknown[] }): void {
+  if (!Array.isArray(imgLayer.objects)) {
+    return;
+  }
+  for (const o of imgLayer.objects) {
+    if (!o || typeof o !== "object" || (o as { type?: string }).type !== "Image") {
+      continue;
+    }
+    const src = (o as { src?: string }).src;
+    if (
+      typeof src === "string" &&
+      (src.startsWith("data:") || src.startsWith("blob:") || !src.trim())
+    ) {
+      throw new Error(
+        "Слой изображений нельзя сохранить: сначала загрузите картинки в облако (встроенные данные отсутствуют).",
+      );
+    }
+  }
+}
+
+/** Патчит JSON для loadFromJSON: CORS, без сброса transform через setSrc. */
+function patchImageLayerForLoad(
+  layer: unknown,
+): Record<string, unknown> {
+  if (!layer || typeof layer !== "object") {
+    return { objects: [] };
+  }
+  const clone = JSON.parse(JSON.stringify(layer)) as Record<string, unknown>;
+  const list = clone.objects;
+  if (!Array.isArray(list)) {
+    clone.objects = [];
+    return clone;
+  }
+  for (const o of list) {
+    if (o && typeof o === "object" && (o as { type?: string }).type === "Image") {
+      const img = o as { src?: string; crossOrigin?: string | null };
+      if (img.src && (img.src.startsWith("http://") || img.src.startsWith("https://"))) {
+        img.crossOrigin = "anonymous";
+      }
+    }
+  }
+  return clone;
+}
+
 /**
  * Data/blob URL → Supabase, чтобы в JSON остались только публичные ссылки.
  */
@@ -100,28 +154,51 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const isImageDeleteModeRef = useRef(false);
   /** Пути в Storage, удалить после успешного сохранения, когда картинку сняли с холста. */
   const pendingImageStorageDeletesRef = useRef<Set<string>>(new Set());
+  const imageCloudSyncDepthRef = useRef(0);
   const [activeTool, setActiveTool] = useState<Tool>("pencil");
   const [isImageActionsOpen, setIsImageActionsOpen] = useState(false);
   const [isImageDeleteMode, setIsImageDeleteMode] = useState(false);
   const [canvasHeight, setCanvasHeight] = useState(600);
   const [isSavingToDrawings, setIsSavingToDrawings] = useState(false);
+  const [isImageCloudSyncing, setIsImageCloudSyncing] = useState(false);
+
+  const beginImageCloudSync = () => {
+    imageCloudSyncDepthRef.current += 1;
+    setIsImageCloudSyncing(true);
+  };
+
+  const endImageCloudSync = () => {
+    imageCloudSyncDepthRef.current = Math.max(0, imageCloudSyncDepthRef.current - 1);
+    if (imageCloudSyncDepthRef.current === 0) {
+      setIsImageCloudSyncing(false);
+    }
+  };
 
   const buildDocumentSnapshot = async (
     imgCanvas: fabric.Canvas,
     textCanvas: fabric.Canvas,
     drawCanvas: fabric.Canvas,
   ): Promise<CanvasSnapshot> => {
-    await prepareImageLayerForSnapshot(imgCanvas);
-    const width = drawCanvas.getWidth();
-    const height = drawCanvas.getHeight();
-    return {
-      imgLayer: imgCanvas.toObject(SNAPSHOT_IMAGE_PROPS),
-      textLayer: textCanvas.toObject(),
-      drawLayer: drawCanvas.toObject(),
-      canvasWidth: width,
-      canvasHeight: height,
-      savedAt: new Date().toISOString(),
-    };
+    beginImageCloudSync();
+    try {
+      await prepareImageLayerForSnapshot(imgCanvas);
+      const width = drawCanvas.getWidth();
+      const height = drawCanvas.getHeight();
+      const imgLayer = imgCanvas.toObject(SNAPSHOT_IMAGE_PROPS) as {
+        objects?: unknown[];
+      };
+      assertImageJsonUsesRemoteSrcOnly(imgLayer);
+      return {
+        imgLayer,
+        textLayer: textCanvas.toObject(),
+        drawLayer: drawCanvas.toObject(),
+        canvasWidth: width,
+        canvasHeight: height,
+        savedAt: new Date().toISOString(),
+      };
+    } finally {
+      endImageCloudSync();
+    }
   };
 
   const setTextEditingVisuals = (text: fabric.IText) => {
@@ -214,19 +291,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         return;
       }
 
-      await imgCanvas.loadFromJSON((snapshot.imgLayer ?? { objects: [] }) as never);
-      if (isCancelled()) {
-        return;
-      }
-      const rehydrated = imgCanvas
-        .getObjects()
-        .filter((obj): obj is fabric.FabricImage => obj instanceof fabric.FabricImage);
-      for (const img of rehydrated) {
-        const s = img.getSrc();
-        if (s && (s.startsWith("http://") || s.startsWith("https://"))) {
-          await img.setSrc(s, { crossOrigin: "anonymous" });
-        }
-      }
+      const imgJson = patchImageLayerForLoad(snapshot.imgLayer ?? { objects: [] });
+      await imgCanvas.loadFromJSON(imgJson);
       if (isCancelled()) {
         return;
       }
@@ -302,9 +368,15 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         }
 
         isSavingRef.current = true;
+        let cloudStarted = false;
         try {
+          beginImageCloudSync();
+          cloudStarted = true;
           await prepareImageLayerForSnapshot(imgCanvas);
-          const imgLayer = imgCanvas.toObject(SNAPSHOT_IMAGE_PROPS);
+          const imgLayer = imgCanvas.toObject(SNAPSHOT_IMAGE_PROPS) as {
+            objects?: unknown[];
+          };
+          assertImageJsonUsesRemoteSrcOnly(imgLayer);
           const textLayer = textCanvas.toObject();
           const drawLayer = drawCanvas.toObject();
           const { error } = await supabase
@@ -331,6 +403,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
             }
           }
         } finally {
+          if (cloudStarted) {
+            endImageCloudSync();
+          }
           isSavingRef.current = false;
         }
       }, SAVE_DEBOUNCE_MS);
@@ -746,6 +821,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return;
     }
 
+    beginImageCloudSync();
     try {
       // Ensure layer dimensions are initialized before first insert.
       recalcDocumentHeightRef.current?.();
@@ -844,6 +920,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     } catch (err) {
       console.warn("Не удалось вставить изображение в Storage / на холст:", err);
     } finally {
+      endImageCloudSync();
       event.target.value = "";
     }
   };
@@ -1042,6 +1119,26 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           </div>
         </div>
       </div>
+
+      {isImageCloudSyncing ? (
+        <div
+          className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center bg-zinc-900/35 backdrop-blur-[2px]"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 bg-white px-6 py-5 shadow-lg">
+            <div
+              className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-blue-600"
+              aria-hidden
+            />
+            <p className="text-sm font-medium text-zinc-800">Загрузка в облако…</p>
+            <p className="max-w-xs text-center text-xs text-zinc-500">
+              Сохраняем изображения в хранилище, подождите
+            </p>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
