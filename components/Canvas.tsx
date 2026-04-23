@@ -10,125 +10,27 @@ import {
   getDrawingById,
 } from "../utils/drawingsApi";
 import {
-  dataUrlToBlob,
-  removeStorageObjects,
-  STORAGE_PATH_KEY,
-  tryParseStoragePathFromPublicUrl,
-  uploadImageBlob,
-} from "../utils/imageStorage";
+  assertImageJsonUsesRemoteSrcOnly,
+  getMinDocumentHeightForWidth,
+  insertImageFromFile,
+  patchImageLayerForLoad,
+  prepareImageLayerForSnapshot,
+  SNAPSHOT_IMAGE_PROPS,
+} from "../utils/canvasLogic";
+import { removeStorageObjects, STORAGE_PATH_KEY } from "../utils/imageStorage";
+import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollaboration";
+import Toolbar, { TOOLBAR_HEIGHT_PX, type Tool } from "./Toolbar";
 
-type Tool = "pencil" | "eraser" | "text";
 type FabricWithEraser = typeof fabric & {
   EraserBrush?: new (canvas: fabric.Canvas) => fabric.BaseBrush;
 };
 
 const TEXT_FONT_SIZE = 14;
 const TEXT_HORIZONTAL_PADDING = 14;
-const A4_WIDTH_MM = 210;
-const A5_HEIGHT_MM = 210;
 const DOCUMENT_BOTTOM_PADDING = 24;
-const MIN_IMAGE_WIDTH_RATIO = 0.3;
-const TOOLBAR_HEIGHT_PX = 72;
 const SUPABASE_CANVAS_TABLE = "canvas_documents";
 const SUPABASE_DOCUMENT_ID = "default";
 const SAVE_DEBOUNCE_MS = 800;
-const SNAPSHOT_IMAGE_PROPS: string[] = [STORAGE_PATH_KEY, "crossOrigin"];
-
-void (function registerImageStorageKey() {
-  const C = fabric.FabricImage as unknown as { customProperties: string[] };
-  if (!C.customProperties) {
-    C.customProperties = [];
-  }
-  if (!C.customProperties.includes(STORAGE_PATH_KEY)) {
-    C.customProperties = [...C.customProperties, STORAGE_PATH_KEY];
-  }
-})();
-
-function assertImageJsonUsesRemoteSrcOnly(imgLayer: { objects?: unknown[] }): void {
-  if (!Array.isArray(imgLayer.objects)) {
-    return;
-  }
-  for (const o of imgLayer.objects) {
-    if (!o || typeof o !== "object" || (o as { type?: string }).type !== "Image") {
-      continue;
-    }
-    const src = (o as { src?: string }).src;
-    if (
-      typeof src === "string" &&
-      (src.startsWith("data:") || src.startsWith("blob:") || !src.trim())
-    ) {
-      throw new Error(
-        "Слой изображений нельзя сохранить: сначала загрузите картинки в облако (встроенные данные отсутствуют).",
-      );
-    }
-  }
-}
-
-/** Патчит JSON для loadFromJSON: CORS, без сброса transform через setSrc. */
-function patchImageLayerForLoad(
-  layer: unknown,
-): Record<string, unknown> {
-  if (!layer || typeof layer !== "object") {
-    return { objects: [] };
-  }
-  const clone = JSON.parse(JSON.stringify(layer)) as Record<string, unknown>;
-  const list = clone.objects;
-  if (!Array.isArray(list)) {
-    clone.objects = [];
-    return clone;
-  }
-  for (const o of list) {
-    if (o && typeof o === "object" && (o as { type?: string }).type === "Image") {
-      const img = o as { src?: string; crossOrigin?: string | null };
-      if (img.src && (img.src.startsWith("http://") || img.src.startsWith("https://"))) {
-        img.crossOrigin = "anonymous";
-      }
-    }
-  }
-  return clone;
-}
-
-/**
- * Data/blob URL → Supabase, чтобы в JSON остались только публичные ссылки.
- */
-async function prepareImageLayerForSnapshot(imgCanvas: fabric.Canvas): Promise<void> {
-  for (const obj of imgCanvas.getObjects()) {
-    if (!(obj instanceof fabric.FabricImage)) {
-      continue;
-    }
-    const src = obj.getSrc();
-    if (!src) {
-      continue;
-    }
-    if (src.startsWith("http://") || src.startsWith("https://")) {
-      if (!obj.get(STORAGE_PATH_KEY)) {
-        const p = tryParseStoragePathFromPublicUrl(src);
-        if (p) {
-          obj.set(STORAGE_PATH_KEY, p);
-        }
-      }
-      continue;
-    }
-    if (src.startsWith("data:")) {
-      const blob = dataUrlToBlob(src);
-      const { publicUrl, storagePath } = await uploadImageBlob(blob, {
-        contentType: blob.type,
-      });
-      await obj.setSrc(publicUrl, { crossOrigin: "anonymous" });
-      obj.set({ [STORAGE_PATH_KEY]: storagePath, crossOrigin: "anonymous" });
-      imgCanvas.requestRenderAll();
-    } else if (src.startsWith("blob:")) {
-      const res = await fetch(src);
-      const blob = await res.blob();
-      const { publicUrl, storagePath } = await uploadImageBlob(blob, {
-        contentType: blob.type,
-      });
-      await obj.setSrc(publicUrl, { crossOrigin: "anonymous" });
-      obj.set({ [STORAGE_PATH_KEY]: storagePath, crossOrigin: "anonymous" });
-      imgCanvas.requestRenderAll();
-    }
-  }
-}
 
 type CanvasProps = {
   selectedDrawingId?: string | null;
@@ -152,7 +54,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeToolRef = useRef<Tool>("pencil");
   const isImageDeleteModeRef = useRef(false);
-  /** Пути в Storage, удалить после успешного сохранения, когда картинку сняли с холста. */
   const pendingImageStorageDeletesRef = useRef<Set<string>>(new Set());
   const imageCloudSyncDepthRef = useRef(0);
   const [activeTool, setActiveTool] = useState<Tool>("pencil");
@@ -161,6 +62,18 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const [canvasHeight, setCanvasHeight] = useState(600);
   const [isSavingToDrawings, setIsSavingToDrawings] = useState(false);
   const [isImageCloudSyncing, setIsImageCloudSyncing] = useState(false);
+  const [canvasesReady, setCanvasesReady] = useState(false);
+
+  const { roomId: collabRoomId, roomFull, cursors, participants: collabParticipants } =
+    useRoomCollaboration({
+      enabled: true,
+      canvasesReady,
+      isRestoringRef: isLoadingDrawingRef,
+      imgCanvasRef,
+      textCanvasRef,
+      drawCanvasRef,
+      boardContainerRef,
+    });
 
   const beginImageCloudSync = () => {
     imageCloudSyncDepthRef.current += 1;
@@ -178,7 +91,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     imgCanvas: fabric.Canvas,
     textCanvas: fabric.Canvas,
     drawCanvas: fabric.Canvas,
-  ): Promise<CanvasSnapshot> => {
+  ) => {
     beginImageCloudSync();
     try {
       await prepareImageLayerForSnapshot(imgCanvas);
@@ -257,12 +170,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
   const searchParams = useSearchParams();
   const idFromUrl = searchParams.get("id") ?? searchParams.get("drawing");
-  /** Сначала выбор из списка, иначе — открытие по ссылке `?id=` / `?drawing=`. */
   const drawingIdToLoad = selectedDrawingId ?? idFromUrl ?? null;
 
-  /**
-   * Восстанавливает три слоя из сохранённого JSON: изображения, текст, штрихи.
-   */
   const loadDrawing = useCallback(
     async (data: CanvasSnapshot, opts?: { isCancelled?: () => boolean }) => {
       const isCancelled = opts?.isCancelled ?? (() => false);
@@ -436,15 +345,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     textCanvas.upperCanvasEl.style.pointerEvents = "auto";
     drawCanvas.upperCanvasEl.style.pointerEvents = "auto";
 
-    const getMinDocumentHeight = (width: number) =>
-      Math.max(320, Math.ceil((width / A4_WIDTH_MM) * A5_HEIGHT_MM));
-
-    const syncCanvasDimensions = (width: number, height: number) => {
-      imgCanvas.setDimensions({ width, height });
-      textCanvas.setDimensions({ width, height });
-      drawCanvas.setDimensions({ width, height });
-    };
-
     const getLowestContentBottom = () => {
       let maxBottom = 0;
       [imgCanvas, textCanvas, drawCanvas].forEach((canvas) => {
@@ -466,14 +366,16 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         320,
         Math.floor(preferredWidth > 0 ? preferredWidth : window.innerWidth * 0.8),
       );
-      const minHeight = getMinDocumentHeight(width);
+      const minHeight = getMinDocumentHeightForWidth(width);
       const contentBottom = getLowestContentBottom();
       const nextHeight = Math.max(
         minHeight,
         Math.ceil(contentBottom + DOCUMENT_BOTTOM_PADDING),
       );
 
-      syncCanvasDimensions(width, nextHeight);
+      imgCanvas.setDimensions({ width, height: nextHeight });
+      textCanvas.setDimensions({ width, height: nextHeight });
+      drawCanvas.setDimensions({ width, height: nextHeight });
       imgCanvas.renderAll();
       textCanvas.renderAll();
       drawCanvas.renderAll();
@@ -574,7 +476,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       canvas.on("object:modified", queueSaveDocument);
     });
 
+    setCanvasesReady(true);
+
     return () => {
+      setCanvasesReady(false);
       window.removeEventListener("resize", scheduleRecalc);
       recalcDocumentHeightRef.current = null;
       requestSaveRef.current = null;
@@ -739,7 +644,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       lastTextObjectRef.current = newText;
       textCanvas.add(newText);
       textCanvas.setActiveObject(newText);
-      textCanvas.setActiveObject(newText);
       newText.enterEditing();
       textCanvas.requestRenderAll();
       recalcDocumentHeightRef.current?.();
@@ -823,100 +727,16 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     beginImageCloudSync();
     try {
-      // Ensure layer dimensions are initialized before first insert.
-      recalcDocumentHeightRef.current?.();
-
-      const ext = file.name.includes(".")
-        ? file.name.slice(file.name.lastIndexOf(".") + 1)
-        : "png";
-      const { publicUrl, storagePath } = await uploadImageBlob(file, {
-        contentType: file.type || "image/png",
-        extension: ext,
+      await insertImageFromFile(file, imgCanvas, {
+        getBoardContainerWidth: () => boardContainerRef.current?.clientWidth ?? 0,
+        getFallbackCanvasWidth: () => Math.floor(window.innerWidth * 0.8),
+        onRecalcHeight: () => recalcDocumentHeightRef.current?.(),
+        onRequestSave: () => requestSaveRef.current?.(),
+        getLastInsertedImage: () => lastInsertedImageRef.current,
+        setLastInsertedImage: (im) => {
+          lastInsertedImageRef.current = im;
+        },
       });
-
-      let canvasWidth = imgCanvas.getWidth();
-      let canvasHeightCurrent = imgCanvas.getHeight();
-      if (canvasWidth <= 1 || canvasHeightCurrent <= 1) {
-        const measuredWidth =
-          boardContainerRef.current?.clientWidth ?? Math.floor(window.innerWidth * 0.8);
-        const minHeight = Math.max(320, Math.ceil((measuredWidth / A4_WIDTH_MM) * A5_HEIGHT_MM));
-        imgCanvas.setDimensions({ width: measuredWidth, height: minHeight });
-        canvasWidth = imgCanvas.getWidth();
-        canvasHeightCurrent = imgCanvas.getHeight();
-      }
-
-      const image = await fabric.FabricImage.fromURL(publicUrl, {
-        crossOrigin: "anonymous",
-      });
-      image.set({ [STORAGE_PATH_KEY]: storagePath, crossOrigin: "anonymous" });
-      const sourceWidth = image.width ?? canvasWidth;
-      const minImageWidth = MIN_IMAGE_WIDTH_RATIO * canvasWidth;
-      const IMAGE_GAP = 20;
-
-      // scale=max((0.3*Wcanvas)/Wimg, min(1, Wcanvas/Wimg))
-      // - larger images scale down to canvas width
-      // - too small images scale up to at least 30% width
-      // - medium images keep original size
-      const scaleDownToFit = Math.min(1, canvasWidth / sourceWidth);
-      const scaleUpToMinimum = minImageWidth / sourceWidth;
-      const nextScale = Math.max(scaleUpToMinimum, scaleDownToFit);
-      const scaledWidth = sourceWidth * nextScale;
-      image.scale(nextScale);
-
-      const previousInsertedImage = lastInsertedImageRef.current;
-      const hasPreviousInsertedImage =
-        previousInsertedImage && imgCanvas.getObjects().includes(previousInsertedImage);
-      const previousBottom =
-        hasPreviousInsertedImage && previousInsertedImage
-          ? previousInsertedImage.getBoundingRect().top +
-            previousInsertedImage.getBoundingRect().height
-          : imgCanvas
-              .getObjects()
-              .filter(
-                (obj): obj is fabric.FabricImage => obj instanceof fabric.FabricImage,
-              )
-              .reduce((maxBottom, imgObj) => {
-                const rect = imgObj.getBoundingRect();
-                return Math.max(maxBottom, rect.top + rect.height);
-              }, 0);
-      const nextTop = previousBottom > 0 ? previousBottom + IMAGE_GAP : 50;
-
-      const clampImageScaleToBounds = () => {
-        const maxWidth = imgCanvas.getWidth();
-        const minWidth = MIN_IMAGE_WIDTH_RATIO * maxWidth;
-        const currentWidth = image.getScaledWidth();
-        if (currentWidth > maxWidth) {
-          image.scaleToWidth(maxWidth);
-        } else if (currentWidth < minWidth) {
-          image.scaleToWidth(minWidth);
-        }
-      };
-
-      image.on("scaling", () => {
-        const uniformScale = Math.max(image.scaleX ?? 1, image.scaleY ?? 1);
-        image.set({
-          scaleX: uniformScale,
-          scaleY: uniformScale,
-        });
-        clampImageScaleToBounds();
-      });
-
-      image.set({
-        originX: "left",
-        originY: "top",
-        left: (canvasWidth - scaledWidth) / 2,
-        top: nextTop,
-        selectable: true,
-        evented: true,
-      });
-      clampImageScaleToBounds();
-      imgCanvas.add(image);
-      imgCanvas.sendObjectToBack(image);
-      imgCanvas.setActiveObject(image);
-      lastInsertedImageRef.current = image;
-      imgCanvas.renderAll();
-      recalcDocumentHeightRef.current?.();
-      requestSaveRef.current?.();
     } catch (err) {
       console.warn("Не удалось вставить изображение в Storage / на холст:", err);
     } finally {
@@ -927,174 +747,58 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
   return (
     <section className="relative h-screen overflow-hidden bg-zinc-100">
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-center gap-2 px-3 py-3">
-          <button
-            type="button"
-            onClick={() => {
-              clearTextEditingVisuals();
-              setIsImageActionsOpen(false);
-              setIsImageDeleteMode(false);
-              isImageDeleteModeRef.current = false;
-              activeToolRef.current = "pencil";
-              setActiveTool("pencil");
-            }}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-              activeTool === "pencil" && !isImageDeleteMode
-                ? "bg-blue-600 text-white"
-                : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
-            }`}
-            title="Карандаш"
-            aria-label="Карандаш"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 20h9" />
-              <path d="m16.5 3.5 4 4L7 21l-4 1 1-4Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              clearTextEditingVisuals();
-              setIsImageActionsOpen(false);
-              setIsImageDeleteMode(false);
-              isImageDeleteModeRef.current = false;
-              activeToolRef.current = "eraser";
-              setActiveTool("eraser");
-            }}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-              activeTool === "eraser" && !isImageDeleteMode
-                ? "bg-blue-600 text-white"
-                : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
-            }`}
-            title="Ластик"
-            aria-label="Ластик"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m7 21 10.5-10.5a2.1 2.1 0 0 0 0-3L13.5 3a2.1 2.1 0 0 0-3 0L2 11.5a2.1 2.1 0 0 0 0 3L8.5 21" />
-              <path d="M22 21H8.5" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={addText}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-              activeTool === "text" && !isImageDeleteMode
-                ? "bg-blue-600 text-white"
-                : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
-            }`}
-            title="Текст"
-            aria-label="Текст"
-          >
-            <span className="text-lg font-black leading-none">T</span>
-          </button>
-          {!isImageActionsOpen ? (
-            <button
-              type="button"
-              onClick={() => {
-                clearTextEditingVisuals();
-                setIsImageActionsOpen(true);
-              }}
-              className="w-28 rounded-md bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-zinc-300"
-              title="Изображение"
-              aria-label="Изображение"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="mx-auto h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="3" y="4" width="18" height="16" rx="2" />
-                <circle cx="9" cy="9" r="1.5" />
-                <path d="m21 16-5-5L5 20" />
-              </svg>
-            </button>
-          ) : (
-            <div className="grid w-28 grid-cols-2 gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  clearTextEditingVisuals();
-                  openFileDialog();
-                }}
-                className="rounded-md bg-zinc-200 px-2 py-2 text-sm font-bold text-zinc-900 transition hover:bg-zinc-300"
-                title="Добавить изображение"
-              >
-                +
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setIsImageDeleteMode((prev) => {
-                    clearTextEditingVisuals();
-                    const next = !prev;
-                    isImageDeleteModeRef.current = next;
-                    return next;
-                  })
-                }
-                className={`rounded-md px-2 py-2 text-sm font-bold transition ${
-                  isImageDeleteMode
-                    ? "bg-red-600 text-white"
-                    : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
-                }`}
-                title="Удалить изображение"
-              >
-                🗑️
-              </button>
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              clearTextEditingVisuals();
-              void saveToSupabase();
-            }}
-            disabled={isSavingToDrawings}
-            className="rounded-md bg-zinc-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-            title="Сохранить"
-          >
-            {isSavingToDrawings ? "Сохранение..." : "Сохранить"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              clearTextEditingVisuals();
-              exportToPng();
-            }}
-            className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500"
-            title="Экспорт в PNG"
-          >
-            Экспорт в PNG
-          </button>
-        </div>
-      </header>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={onFileSelected}
-        className="hidden"
+      <Toolbar
+        activeTool={activeTool}
+        isImageDeleteMode={isImageDeleteMode}
+        isImageActionsOpen={isImageActionsOpen}
+        isSavingToDrawings={isSavingToDrawings}
+        collabRoomId={collabRoomId}
+        collabParticipants={collabParticipants}
+        roomFull={roomFull}
+        maxRoomParticipants={MAX_ROOM_PARTICIPANTS}
+        fileInputRef={fileInputRef}
+        onPencil={() => {
+          clearTextEditingVisuals();
+          setIsImageActionsOpen(false);
+          setIsImageDeleteMode(false);
+          isImageDeleteModeRef.current = false;
+          activeToolRef.current = "pencil";
+          setActiveTool("pencil");
+        }}
+        onEraser={() => {
+          clearTextEditingVisuals();
+          setIsImageActionsOpen(false);
+          setIsImageDeleteMode(false);
+          isImageDeleteModeRef.current = false;
+          activeToolRef.current = "eraser";
+          setActiveTool("eraser");
+        }}
+        onText={addText}
+        onOpenImageMenu={() => {
+          clearTextEditingVisuals();
+          setIsImageActionsOpen(true);
+        }}
+        onAddImage={() => {
+          clearTextEditingVisuals();
+          openFileDialog();
+        }}
+        onToggleImageDelete={() => {
+          setIsImageDeleteMode((prev) => {
+            clearTextEditingVisuals();
+            const next = !prev;
+            isImageDeleteModeRef.current = next;
+            return next;
+          });
+        }}
+        onSave={() => {
+          clearTextEditingVisuals();
+          void saveToSupabase();
+        }}
+        onExportPng={() => {
+          clearTextEditingVisuals();
+          exportToPng();
+        }}
+        onFileChange={onFileSelected}
       />
 
       <div
@@ -1116,6 +820,29 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
               ref={drawCanvasElementRef}
               className={`absolute inset-0 z-[3] ${isImageDeleteMode ? "pointer-events-none" : "pointer-events-auto"}`}
             />
+            <div
+              className="pointer-events-none absolute inset-0 z-[25]"
+              aria-hidden
+            >
+              {cursors.map((c) => (
+                <div
+                  key={c.senderId}
+                  className="absolute -translate-x-1/2 -translate-y-1/2"
+                  style={{ left: `${c.xPct * 100}%`, top: `${c.yPct * 100}%` }}
+                >
+                  <div
+                    className="h-2.5 w-2.5 rounded-full border-2 border-white shadow"
+                    style={{ backgroundColor: c.color }}
+                  />
+                  <div
+                    className="mt-0.5 max-w-[7rem] truncate rounded px-1 py-0.5 text-[10px] text-white shadow"
+                    style={{ backgroundColor: c.color }}
+                  >
+                    {c.name}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
