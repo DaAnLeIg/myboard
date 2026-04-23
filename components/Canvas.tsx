@@ -9,6 +9,13 @@ import {
   createDrawing,
   getDrawingById,
 } from "../utils/drawingsApi";
+import {
+  dataUrlToBlob,
+  removeStorageObjects,
+  STORAGE_PATH_KEY,
+  tryParseStoragePathFromPublicUrl,
+  uploadImageBlob,
+} from "../utils/imageStorage";
 
 type Tool = "pencil" | "eraser" | "text";
 type FabricWithEraser = typeof fabric & {
@@ -25,6 +32,49 @@ const TOOLBAR_HEIGHT_PX = 72;
 const SUPABASE_CANVAS_TABLE = "canvas_documents";
 const SUPABASE_DOCUMENT_ID = "default";
 const SAVE_DEBOUNCE_MS = 800;
+const SNAPSHOT_IMAGE_PROPS: string[] = [STORAGE_PATH_KEY, "crossOrigin"];
+
+/**
+ * Data/blob URL → Supabase, чтобы в JSON остались только публичные ссылки.
+ */
+async function prepareImageLayerForSnapshot(imgCanvas: fabric.Canvas): Promise<void> {
+  for (const obj of imgCanvas.getObjects()) {
+    if (!(obj instanceof fabric.FabricImage)) {
+      continue;
+    }
+    const src = obj.getSrc();
+    if (!src) {
+      continue;
+    }
+    if (src.startsWith("http://") || src.startsWith("https://")) {
+      if (!obj.get(STORAGE_PATH_KEY)) {
+        const p = tryParseStoragePathFromPublicUrl(src);
+        if (p) {
+          obj.set(STORAGE_PATH_KEY, p);
+        }
+      }
+      continue;
+    }
+    if (src.startsWith("data:")) {
+      const blob = dataUrlToBlob(src);
+      const { publicUrl, storagePath } = await uploadImageBlob(blob, {
+        contentType: blob.type,
+      });
+      await obj.setSrc(publicUrl, { crossOrigin: "anonymous" });
+      obj.set({ [STORAGE_PATH_KEY]: storagePath, crossOrigin: "anonymous" });
+      imgCanvas.requestRenderAll();
+    } else if (src.startsWith("blob:")) {
+      const res = await fetch(src);
+      const blob = await res.blob();
+      const { publicUrl, storagePath } = await uploadImageBlob(blob, {
+        contentType: blob.type,
+      });
+      await obj.setSrc(publicUrl, { crossOrigin: "anonymous" });
+      obj.set({ [STORAGE_PATH_KEY]: storagePath, crossOrigin: "anonymous" });
+      imgCanvas.requestRenderAll();
+    }
+  }
+}
 
 type CanvasProps = {
   selectedDrawingId?: string | null;
@@ -48,23 +98,26 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeToolRef = useRef<Tool>("pencil");
   const isImageDeleteModeRef = useRef(false);
+  /** Пути в Storage, удалить после успешного сохранения, когда картинку сняли с холста. */
+  const pendingImageStorageDeletesRef = useRef<Set<string>>(new Set());
   const [activeTool, setActiveTool] = useState<Tool>("pencil");
   const [isImageActionsOpen, setIsImageActionsOpen] = useState(false);
   const [isImageDeleteMode, setIsImageDeleteMode] = useState(false);
   const [canvasHeight, setCanvasHeight] = useState(600);
   const [isSavingToDrawings, setIsSavingToDrawings] = useState(false);
 
-  const buildDocumentSnapshot = (
+  const buildDocumentSnapshot = async (
     imgCanvas: fabric.Canvas,
     textCanvas: fabric.Canvas,
     drawCanvas: fabric.Canvas,
-  ): CanvasSnapshot => {
+  ): Promise<CanvasSnapshot> => {
+    await prepareImageLayerForSnapshot(imgCanvas);
     const width = drawCanvas.getWidth();
     const height = drawCanvas.getHeight();
     return {
-      imgLayer: imgCanvas.toJSON(),
-      textLayer: textCanvas.toJSON(),
-      drawLayer: drawCanvas.toJSON(),
+      imgLayer: imgCanvas.toObject(SNAPSHOT_IMAGE_PROPS),
+      textLayer: textCanvas.toObject(),
+      drawLayer: drawCanvas.toObject(),
       canvasWidth: width,
       canvasHeight: height,
       savedAt: new Date().toISOString(),
@@ -161,21 +214,27 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         return;
       }
 
-      await Promise.resolve(
-        imgCanvas.loadFromJSON((snapshot.imgLayer ?? { objects: [] }) as never),
-      );
+      await imgCanvas.loadFromJSON((snapshot.imgLayer ?? { objects: [] }) as never);
       if (isCancelled()) {
         return;
       }
-      await Promise.resolve(
-        textCanvas.loadFromJSON((snapshot.textLayer ?? { objects: [] }) as never),
-      );
+      const rehydrated = imgCanvas
+        .getObjects()
+        .filter((obj): obj is fabric.FabricImage => obj instanceof fabric.FabricImage);
+      for (const img of rehydrated) {
+        const s = img.getSrc();
+        if (s && (s.startsWith("http://") || s.startsWith("https://"))) {
+          await img.setSrc(s, { crossOrigin: "anonymous" });
+        }
+      }
       if (isCancelled()) {
         return;
       }
-      await Promise.resolve(
-        drawCanvas.loadFromJSON((snapshot.drawLayer ?? { objects: [] }) as never),
-      );
+      await textCanvas.loadFromJSON((snapshot.textLayer ?? { objects: [] }) as never);
+      if (isCancelled()) {
+        return;
+      }
+      await drawCanvas.loadFromJSON((snapshot.drawLayer ?? { objects: [] }) as never);
       if (isCancelled()) {
         return;
       }
@@ -244,9 +303,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
         isSavingRef.current = true;
         try {
-          const imgLayer = imgCanvas.toJSON();
-          const textLayer = textCanvas.toJSON();
-          const drawLayer = drawCanvas.toJSON();
+          await prepareImageLayerForSnapshot(imgCanvas);
+          const imgLayer = imgCanvas.toObject(SNAPSHOT_IMAGE_PROPS);
+          const textLayer = textCanvas.toObject();
+          const drawLayer = drawCanvas.toObject();
           const { error } = await supabase
             .from(SUPABASE_CANVAS_TABLE)
             .upsert(
@@ -263,6 +323,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
           if (error) {
             console.warn("Supabase save failed:", error.message);
+          } else {
+            const toRemove = [...pendingImageStorageDeletesRef.current];
+            pendingImageStorageDeletesRef.current.clear();
+            if (toRemove.length > 0) {
+              await removeStorageObjects(toRemove);
+            }
           }
         } finally {
           isSavingRef.current = false;
@@ -409,6 +475,19 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       imgCanvas.renderAll();
       scheduleRecalc();
       queueSaveDocument();
+    });
+
+    imgCanvas.on("object:removed", (e) => {
+      if (isLoadingDrawingRef.current) {
+        return;
+      }
+      const t = e.target;
+      if (t && t instanceof fabric.FabricImage) {
+        const p = t.get(STORAGE_PATH_KEY) as string | undefined;
+        if (typeof p === "string" && p.length > 0) {
+          pendingImageStorageDeletesRef.current.add(p);
+        }
+      }
     });
 
     [imgCanvas, textCanvas, drawCanvas].forEach((canvas) => {
@@ -607,12 +686,17 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     setIsSavingToDrawings(true);
     try {
-      const content = buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
+      const content = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
       await createDrawing({
         name: "MyBoard",
         content,
         roomId: "room-1",
       });
+      const toRemove = [...pendingImageStorageDeletesRef.current];
+      pendingImageStorageDeletesRef.current.clear();
+      if (toRemove.length > 0) {
+        await removeStorageObjects(toRemove);
+      }
       console.log("Работа сохранена в базу!");
       alert("Работа сохранена в базу!");
     } catch (error) {
@@ -662,10 +746,17 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return;
     }
 
-    const imageUrl = URL.createObjectURL(file);
     try {
       // Ensure layer dimensions are initialized before first insert.
       recalcDocumentHeightRef.current?.();
+
+      const ext = file.name.includes(".")
+        ? file.name.slice(file.name.lastIndexOf(".") + 1)
+        : "png";
+      const { publicUrl, storagePath } = await uploadImageBlob(file, {
+        contentType: file.type || "image/png",
+        extension: ext,
+      });
 
       let canvasWidth = imgCanvas.getWidth();
       let canvasHeightCurrent = imgCanvas.getHeight();
@@ -678,7 +769,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         canvasHeightCurrent = imgCanvas.getHeight();
       }
 
-      const image = await fabric.FabricImage.fromURL(imageUrl);
+      const image = await fabric.FabricImage.fromURL(publicUrl, {
+        crossOrigin: "anonymous",
+      });
+      image.set({ [STORAGE_PATH_KEY]: storagePath, crossOrigin: "anonymous" });
       const sourceWidth = image.width ?? canvasWidth;
       const minImageWidth = MIN_IMAGE_WIDTH_RATIO * canvasWidth;
       const IMAGE_GAP = 20;
@@ -747,8 +841,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       imgCanvas.renderAll();
       recalcDocumentHeightRef.current?.();
       requestSaveRef.current?.();
+    } catch (err) {
+      console.warn("Не удалось вставить изображение в Storage / на холст:", err);
     } finally {
-      URL.revokeObjectURL(imageUrl);
       event.target.value = "";
     }
   };
