@@ -1,0 +1,125 @@
+import { supabase } from "./supabaseClient";
+
+export type CanvasSnapshot = {
+  imgLayer: unknown;
+  textLayer: unknown;
+  drawLayer: unknown;
+  canvasHeight: number;
+  savedAt: string;
+};
+
+export type DrawingRow = {
+  id: string;
+  created_at: string;
+  name: string;
+  content: CanvasSnapshot;
+  preview_url: string | null;
+  room_id: string | null;
+};
+
+type CreateDrawingInput = {
+  name: string;
+  content: CanvasSnapshot;
+  previewUrl?: string | null;
+  roomId?: string | null;
+};
+
+type UpdateDrawingInput = {
+  id: string;
+  name?: string;
+  content?: CanvasSnapshot;
+  previewUrl?: string | null;
+  roomId?: string | null;
+};
+
+export async function createDrawing(input: CreateDrawingInput) {
+  const { data, error } = await supabase
+    .from("drawings")
+    .insert({
+      name: input.name,
+      content: input.content,
+      preview_url: input.previewUrl ?? null,
+      room_id: input.roomId ?? null,
+    })
+    .select("id, created_at, name, content, preview_url, room_id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as DrawingRow;
+}
+
+export async function listDrawings(limit = 30) {
+  const { data, error } = await supabase
+    .from("drawings")
+    .select("id, created_at, name, content, preview_url, room_id")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []) as DrawingRow[];
+}
+
+export async function getDrawingById(id: string) {
+  const { data, error } = await supabase
+    .from("drawings")
+    .select("id, created_at, name, content, preview_url, room_id")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as DrawingRow;
+}
+
+export async function getLatestDrawingByRoom(roomId: string) {
+  const { data, error } = await supabase
+    .from("drawings")
+    .select("id, created_at, name, content, preview_url, room_id")
+    .eq("room_id", roomId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? null) as DrawingRow | null;
+}
+
+export async function updateDrawing(input: UpdateDrawingInput) {
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) {
+    patch.name = input.name;
+  }
+  if (input.content !== undefined) {
+    patch.content = input.content;
+  }
+  if (input.previewUrl !== undefined) {
+    patch.preview_url = input.previewUrl;
+  }
+  if (input.roomId !== undefined) {
+    patch.room_id = input.roomId;
+  }
+
+  const { data, error } = await supabase
+    .from("drawings")
+    .update(patch)
+    .eq("id", input.id)
+    .select("id, created_at, name, content, preview_url, room_id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as DrawingRow;
+}
