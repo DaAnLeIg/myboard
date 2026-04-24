@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { useSavedWorksRefresh } from "../contexts/SavedWorksRefreshContext";
 import { listDrawings, type DrawingRow } from "../utils/drawingsApi";
 
@@ -59,7 +60,12 @@ export default function SavedWorksList({
         <h2 className="text-lg font-semibold text-zinc-900">Сохраненные работы</h2>
       </div>
 
-      {isLoading ? <p className="text-sm text-zinc-600">Загрузка...</p> : null}
+      {isLoading ? (
+        <div className="flex items-center gap-2 py-2 text-zinc-500" aria-busy="true" aria-live="polite">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={1.75} aria-hidden />
+          <span className="sr-only">Загрузка списка</span>
+        </div>
+      ) : null}
       {error ? <p className="text-sm text-red-600">Ошибка: {error}</p> : null}
       {!isLoading && !error && items.length === 0 ? (
         <p className="text-sm text-zinc-600">Пока нет сохраненных работ.</p>

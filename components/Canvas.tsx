@@ -18,7 +18,6 @@ import {
   SNAPSHOT_IMAGE_PROPS,
 } from "../utils/canvasLogic";
 import { removeStorageObjects, STORAGE_PATH_KEY } from "../utils/imageStorage";
-import { Loader2 } from "lucide-react";
 import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollaboration";
 import StudioConsole, {
   STUDIO_CONSOLE_HEIGHT_PX,
@@ -63,14 +62,15 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const pencilColorRef = useRef<string>(DEFAULT_PENCIL_COLOR);
   const textFontSizeRef = useRef<TextSizeOption>(DEFAULT_TEXT_SIZE);
   const pendingImageStorageDeletesRef = useRef<Set<string>>(new Set());
-  const imageCloudSyncDepthRef = useRef(0);
+  const networkOpDepthRef = useRef(0);
   const [activeTool, setActiveTool] = useState<Tool>("pencil");
   const [pencilColor, setPencilColor] = useState<string>(DEFAULT_PENCIL_COLOR);
   const [textFontSize, setTextFontSize] = useState<TextSizeOption>(DEFAULT_TEXT_SIZE);
   const [isImageDeleteMode, setIsImageDeleteMode] = useState(false);
   const [canvasHeight, setCanvasHeight] = useState(600);
   const [isSavingToDrawings, setIsSavingToDrawings] = useState(false);
-  const [isImageCloudSyncing, setIsImageCloudSyncing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [networkErrorTick, setNetworkErrorTick] = useState(0);
   const [canvasesReady, setCanvasesReady] = useState(false);
   const [defaultWorkName, setDefaultWorkName] = useState("MyBoard");
 
@@ -85,15 +85,21 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       boardContainerRef,
     });
 
-  const beginImageCloudSync = () => {
-    imageCloudSyncDepthRef.current += 1;
-    setIsImageCloudSyncing(true);
+  const bumpNetworkError = useCallback(() => {
+    setNetworkErrorTick((n) => n + 1);
+  }, []);
+
+  const beginNetworkOp = () => {
+    networkOpDepthRef.current += 1;
+    if (networkOpDepthRef.current === 1) {
+      setIsProcessing(true);
+    }
   };
 
-  const endImageCloudSync = () => {
-    imageCloudSyncDepthRef.current = Math.max(0, imageCloudSyncDepthRef.current - 1);
-    if (imageCloudSyncDepthRef.current === 0) {
-      setIsImageCloudSyncing(false);
+  const endNetworkOp = () => {
+    networkOpDepthRef.current = Math.max(0, networkOpDepthRef.current - 1);
+    if (networkOpDepthRef.current === 0) {
+      setIsProcessing(false);
     }
   };
 
@@ -102,7 +108,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     textCanvas: fabric.Canvas,
     drawCanvas: fabric.Canvas,
   ) => {
-    beginImageCloudSync();
+    beginNetworkOp();
     try {
       await prepareImageLayerForSnapshot(imgCanvas);
       const width = drawCanvas.getWidth();
@@ -120,7 +126,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         savedAt: new Date().toISOString(),
       };
     } finally {
-      endImageCloudSync();
+      endNetworkOp();
     }
   };
 
@@ -363,10 +369,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         }
 
         isSavingRef.current = true;
-        let cloudStarted = false;
+        let netStarted = false;
         try {
-          beginImageCloudSync();
-          cloudStarted = true;
+          beginNetworkOp();
+          netStarted = true;
           await prepareImageLayerForSnapshot(imgCanvas);
           const imgLayer = imgCanvas.toObject(SNAPSHOT_IMAGE_PROPS) as {
             objects?: unknown[];
@@ -390,16 +396,25 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
           if (error) {
             console.warn("Supabase save failed:", error.message);
+            bumpNetworkError();
           } else {
             const toRemove = [...pendingImageStorageDeletesRef.current];
             pendingImageStorageDeletesRef.current.clear();
             if (toRemove.length > 0) {
-              await removeStorageObjects(toRemove);
+              try {
+                await removeStorageObjects(toRemove);
+              } catch (e) {
+                console.warn("Storage remove failed:", e);
+                bumpNetworkError();
+              }
             }
           }
+        } catch (e) {
+          console.warn("Autosave failed:", e);
+          bumpNetworkError();
         } finally {
-          if (cloudStarted) {
-            endImageCloudSync();
+          if (netStarted) {
+            endNetworkOp();
           }
           isSavingRef.current = false;
         }
@@ -600,6 +615,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     let isCancelled = false;
     const run = async () => {
+      beginNetworkOp();
       try {
         isLoadingDrawingRef.current = true;
         const drawing = await getDrawingById(drawingIdToLoad);
@@ -613,7 +629,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         await loadDrawing(snapshot, { isCancelled: () => isCancelled });
       } catch (error) {
         console.warn("Failed to load drawing:", error);
+        bumpNetworkError();
       } finally {
+        endNetworkOp();
         isLoadingDrawingRef.current = false;
       }
     };
@@ -760,6 +778,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     const trimmed = name.trim() || "MyBoard";
     setIsSavingToDrawings(true);
+    beginNetworkOp();
     try {
       const content = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
       await createDrawing({
@@ -771,15 +790,18 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       const toRemove = [...pendingImageStorageDeletesRef.current];
       pendingImageStorageDeletesRef.current.clear();
       if (toRemove.length > 0) {
-        await removeStorageObjects(toRemove);
+        try {
+          await removeStorageObjects(toRemove);
+        } catch (e) {
+          console.warn("removeStorageObjects after save:", e);
+          bumpNetworkError();
+        }
       }
-      console.log("Работа сохранена в базу!");
-      alert("Работа сохранена в базу!");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Неизвестная ошибка";
       console.warn("saveToSupabase failed:", error);
-      alert(`Ошибка сохранения: ${message}`);
+      bumpNetworkError();
     } finally {
+      endNetworkOp();
       setIsSavingToDrawings(false);
     }
   };
@@ -822,7 +844,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return;
     }
 
-    beginImageCloudSync();
+    beginNetworkOp();
     try {
       await insertImageFromFile(file, imgCanvas, {
         getBoardContainerWidth: () => boardContainerRef.current?.clientWidth ?? 0,
@@ -836,8 +858,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       });
     } catch (err) {
       console.warn("Не удалось вставить изображение в Storage / на холст:", err);
+      bumpNetworkError();
     } finally {
-      endImageCloudSync();
+      endNetworkOp();
       event.target.value = "";
     }
   };
@@ -851,6 +874,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         pencilColor={pencilColor}
         isImageDeleteMode={isImageDeleteMode}
         isSavingToDrawings={isSavingToDrawings}
+        isProcessing={isProcessing}
+        networkErrorTick={networkErrorTick}
+        onBackgroundNetworkError={bumpNetworkError}
         textFontSize={textFontSize}
         collabRoomId={collabRoomId}
         collabParticipants={collabParticipants}
@@ -949,26 +975,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         </div>
       </div>
 
-      {isImageCloudSyncing ? (
-        <div
-          className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center bg-zinc-900/35 backdrop-blur-[2px]"
-          role="status"
-          aria-live="polite"
-          aria-busy="true"
-        >
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 bg-white px-6 py-5 shadow-lg">
-            <Loader2
-              className="h-10 w-10 animate-spin text-blue-600"
-              strokeWidth={2}
-              aria-hidden
-            />
-            <p className="text-sm font-medium text-zinc-800">Загрузка в облако…</p>
-            <p className="max-w-xs text-center text-xs text-zinc-500">
-              Сохраняем изображения в хранилище, подождите
-            </p>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

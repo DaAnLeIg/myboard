@@ -66,7 +66,6 @@ export default function LibraryModal() {
     const rowId = row.id;
     if (typeof rowId !== "string" || !rowId.trim()) {
       console.error("Ожидалась строка (UUID) в row.id, получено:", rowId);
-      window.alert("Некорректный идентификатор записи.");
       return;
     }
     setDeletingId(rowId);
@@ -74,18 +73,12 @@ export default function LibraryModal() {
       console.log("Удаляю ID:", rowId);
       const { error } = await supabase.from("drawings").delete().eq("id", rowId);
       if (error) {
-        console.log(error);
-        window.alert(
-          `Не удалось удалить работу: ${error.message ?? "неизвестная ошибка"}`,
-        );
+        console.warn("Удаление работы:", error);
         return;
       }
       setRows((list) => list.filter((r) => r.id !== rowId));
     } catch (e) {
-      console.log(e);
-      window.alert(
-        e instanceof Error ? e.message : "Не удалось удалить работу",
-      );
+      console.warn("Удаление работы:", e);
     } finally {
       setDeletingId(null);
     }
@@ -144,7 +137,10 @@ export default function LibraryModal() {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
-            <p className="text-sm text-gray-500">Загрузка…</p>
+            <div className="flex items-center gap-2 py-2 text-gray-400" aria-busy="true" aria-live="polite">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={1.75} aria-hidden />
+              <span className="sr-only">Загрузка списка</span>
+            </div>
           ) : error ? (
             <p className="text-sm text-red-600/90">Ошибка: {error}</p>
           ) : rows.length === 0 ? (

@@ -67,6 +67,11 @@ type StudioConsoleProps = {
   pencilColor: string;
   isImageDeleteMode: boolean;
   isSavingToDrawings: boolean;
+  /** Фоновые сетевые операции (Supabase, Storage, подготовка снимка). */
+  isProcessing?: boolean;
+  /** Увеличивается при ошибке фоновой операции — кратко подсвечивает иконку обновления. */
+  networkErrorTick?: number;
+  onBackgroundNetworkError?: () => void;
   textFontSize: TextSizeOption;
   collabRoomId: string;
   collabParticipants: number;
@@ -91,6 +96,9 @@ export default function StudioConsole({
   pencilColor,
   isImageDeleteMode,
   isSavingToDrawings,
+  isProcessing = false,
+  networkErrorTick = 0,
+  onBackgroundNetworkError,
   textFontSize,
   collabRoomId,
   collabParticipants,
@@ -186,12 +194,25 @@ export default function StudioConsole({
     }
   };
 
+  const [refreshErrorFlash, setRefreshErrorFlash] = useState(false);
+
+  useEffect(() => {
+    if (!networkErrorTick) {
+      return;
+    }
+    setRefreshErrorFlash(true);
+    const id = window.setTimeout(() => setRefreshErrorFlash(false), 2200);
+    return () => window.clearTimeout(id);
+  }, [networkErrorTick]);
+
+  const flashRefreshError = () => {
+    onBackgroundNetworkError?.();
+  };
+
   const handleShare = async () => {
     const url = buildRoomInviteUrl();
     if (!url || !isValidRoomInviteUrl(url)) {
-      window.alert(
-        "Нельзя поделиться: в ссылке нет комнаты совместной работы. Обновите страницу и попробуйте снова.",
-      );
+      flashRefreshError();
       return;
     }
     const text = `Присоединяйся к моей работе в MyBoard! Ссылка: ${url}`;
@@ -212,9 +233,8 @@ export default function StudioConsole({
     }
     try {
       await navigator.clipboard.writeText(text);
-      window.alert("Ссылка скопирована!");
     } catch {
-      window.alert("Не удалось скопировать ссылку.");
+      flashRefreshError();
     }
   };
 
@@ -489,11 +509,18 @@ export default function StudioConsole({
               <button
                 type="button"
                 onClick={() => requestSavedListRefresh()}
-                className={`${toolButtonBase} h-8 w-8 rounded-md text-zinc-800 ${toolButtonInactive}`}
-                title="Обновить список работ"
-                aria-label="Обновить список сохранённых работ"
+                aria-busy={isProcessing}
+                className={`${toolButtonBase} h-8 w-8 rounded-md transition-colors duration-200 ${
+                  refreshErrorFlash ? "text-red-500" : "text-zinc-800"
+                } ${toolButtonInactive}`}
+                title="Статус синхронизации и обновление списка работ"
+                aria-label="Статус фоновых операций и обновить список сохранённых работ"
               >
-                <RefreshCw className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${isProcessing ? "animate-spin" : ""}`}
+                  strokeWidth={ICON}
+                  aria-hidden
+                />
               </button>
             ) : null}
             </div>

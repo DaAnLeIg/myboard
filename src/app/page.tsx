@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import Canvas from "../../components/Canvas";
 import SavedWorksList from "../../components/SavedWorksList";
@@ -29,8 +30,9 @@ export default function Home() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-zinc-100 text-sm text-zinc-600">
-          Загрузка…
+        <div className="flex min-h-screen items-center justify-center bg-zinc-100">
+          <Loader2 className="h-8 w-8 animate-spin text-zinc-400" strokeWidth={1.75} aria-hidden />
+          <span className="sr-only">Загрузка</span>
         </div>
       }
     >
