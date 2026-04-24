@@ -85,7 +85,7 @@ function colorForClientId(id: string) {
   return COLORS[h] ?? COLORS[0];
 }
 
-type LayerId = "img" | "text" | "draw";
+export type LayerId = "img" | "text" | "draw";
 
 type ObjectAddPayload = {
   type: "collab-object-add";
@@ -308,7 +308,8 @@ function unwrapDrawEvent(payload: Record<string, unknown>): Record<string, unkno
   return payload;
 }
 
-async function upsertObjectOnCanvas(
+/** Применение сериализованного объекта (broadcast / Supabase) к слою. */
+export async function upsertObjectOnCanvas(
   layer: LayerId,
   raw: Record<string, unknown>,
   getCanvas: (layer: LayerId) => Canvas | null,
@@ -448,7 +449,7 @@ async function upsertObjectOnCanvas(
   }
 }
 
-function removeObjectByCollabId(
+export function removeObjectByCollabId(
   layer: LayerId,
   collabId: string,
   getCanvas: (l: LayerId) => Canvas | null,

@@ -30,15 +30,19 @@ import {
   saveCanvasObjectsFromSnapshot,
   syncDexieCanvasObjectsWithSupabase,
 } from "../utils/db";
+import { v4 as uuidv4 } from "uuid";
 import {
-  db,
-  markCanvasObjectSynced,
+  pushChanges,
+  pushChangesDebounced,
   replaceDrawingCanvasObjectsLocal,
+  supabaseRowToCanvasObject,
   upsertCanvasObjectLocal,
   upsertProjectLocal,
 } from "../lib/db";
 import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollaboration";
+import { useOfflineSync } from "../hooks/useOfflineSync";
 import { cn } from "../utils/cn";
+import { useLocale } from "../contexts/LocaleContext";
 import StudioConsole, {
   STUDIO_CONSOLE_HEIGHT_PX,
   type BoardExportFormat,
@@ -119,6 +123,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const [defaultWorkName, setDefaultWorkName] = useState("MyBoard");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const { inputBcp47, isTextRtl } = useLocale();
+  const textInputLocaleRef = useRef({ bcp47: inputBcp47, rtl: isTextRtl });
   const [appearance, setAppearance] = useState<{ inverted: boolean; comfort: boolean }>({
     inverted: false,
     comfort: false,
@@ -143,6 +149,35 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   }, []);
+
+  useEffect(() => {
+    textInputLocaleRef.current = { bcp47: inputBcp47, rtl: isTextRtl };
+  }, [inputBcp47, isTextRtl]);
+
+  const applyITextLocaleToObject = (o: fabric.IText) => {
+    requestAnimationFrame(() => {
+      const ta = o.hiddenTextarea;
+      if (ta) {
+        ta.setAttribute("lang", textInputLocaleRef.current.bcp47);
+        ta.setAttribute("dir", textInputLocaleRef.current.rtl ? "rtl" : "ltr");
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!canvasesReady) {
+      return;
+    }
+    const textCanvas = textCanvasRef.current;
+    if (!textCanvas) {
+      return;
+    }
+    for (const o of textCanvas.getObjects()) {
+      if (o instanceof fabric.IText) {
+        applyITextLocaleToObject(o);
+      }
+    }
+  }, [inputBcp47, isTextRtl, canvasesReady]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -283,7 +318,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       const getFn = (obj as fabric.Object & { get?: (k: string) => unknown }).get;
       const setFn = (obj as fabric.Object & { set?: (k: string, v: unknown) => void }).set;
       const currentId = typeof getFn === "function" ? (getFn.call(obj, "mbCollabId") as string | undefined) : undefined;
-      const objectId = (typeof currentId === "string" && currentId) || crypto.randomUUID();
+      const objectId = (typeof currentId === "string" && currentId) || uuidv4();
       if (typeof setFn === "function" && (!currentId || currentId !== objectId)) {
         setFn.call(obj, "mbCollabId", objectId);
       }
@@ -305,81 +340,27 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           : null;
       const drawingId = selectedDrawingId ?? drawingIdFromUrl ?? SUPABASE_DOCUMENT_ID;
       const rowId = `${drawingId}:${objectId}`;
-      const updatedAt = new Date().toISOString();
-      const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
+      const t = Date.now();
 
       await upsertCanvasObjectLocal({
         id: rowId,
         drawing_id: drawingId,
         object_id: objectId,
         layer,
-        payload: serialized,
-        updated_at: updatedAt,
-        dirty: isOffline,
-        last_sync_tstamp: null,
+        fabric_json: serialized,
+        last_updated: t,
+        sync_status: "pending",
       });
-
-      if (isOffline) {
-        return;
-      }
-
-      const { error } = await supabase.from("canvas_objects").upsert(
-        {
-          id: rowId,
-          drawing_id: drawingId,
-          object_id: objectId,
-          layer,
-          payload: serialized,
-          updated_at: updatedAt,
-          last_updated_at: updatedAt,
-          last_sync_tstamp: updatedAt,
-        },
-        { onConflict: "id" },
-      );
-      if (!error) {
-        await markCanvasObjectSynced(rowId);
-      } else {
-        console.warn("canvas_objects upsert failed:", error);
-      }
+      pushChangesDebounced();
     },
     [selectedDrawingId],
   );
 
   const syncOfflineChanges = useCallback(async () => {
     try {
-      const rows = await db.canvas_objects.toArray();
-      const pending = rows.filter((row) => {
-        const localTs = new Date(row.updated_at).getTime();
-        const syncTs = row.last_sync_tstamp ? new Date(row.last_sync_tstamp).getTime() : 0;
-        return Number.isFinite(localTs) && localTs > syncTs;
-      });
-      if (pending.length === 0) {
-        return;
-      }
-
-      const payload = pending.map((row) => ({
-        id: row.id,
-        drawing_id: row.drawing_id,
-        object_id: row.object_id,
-        layer: row.layer,
-        payload: row.payload,
-        updated_at: row.updated_at,
-        last_updated_at: row.updated_at,
-        last_sync_tstamp: new Date().toISOString(),
-      }));
-
-      const { error } = await supabase.from("canvas_objects").upsert(payload, {
-        onConflict: "id",
-      });
-      if (error) {
-        throw error;
-      }
-
-      for (const row of pending) {
-        await markCanvasObjectSynced(row.id);
-      }
+      await pushChanges();
     } catch (e) {
-      console.warn("syncOfflineChanges failed:", e);
+      console.warn("pushChanges failed:", e);
     }
   }, []);
 
@@ -394,7 +375,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return;
     }
     if (typeof setFn === "function") {
-      setFn.call(obj, "mbCollabId", crypto.randomUUID());
+      setFn.call(obj, "mbCollabId", uuidv4());
     }
   };
 
@@ -607,6 +588,17 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const searchParams = useSearchParams();
   const idFromUrl = searchParams.get("id") ?? searchParams.get("drawing");
   const drawingIdToLoad = selectedDrawingId ?? idFromUrl ?? null;
+  const canvasObjectDrawingId = (selectedDrawingId ?? idFromUrl) ?? SUPABASE_DOCUMENT_ID;
+
+  useOfflineSync({
+    enabled: true,
+    syncDrawingId: canvasObjectDrawingId,
+    canvasesReady,
+    isRestoringRef: isLoadingDrawingRef,
+    imgCanvasRef,
+    textCanvasRef,
+    drawCanvasRef,
+  });
 
   const loadDrawing = useCallback(
     async (
@@ -1023,6 +1015,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         event.target.enterEditing();
         event.target.selectAll();
         event.target.hiddenTextarea?.focus();
+        applyITextLocaleToObject(event.target);
         textCanvas.requestRenderAll();
         queueSaveDocument();
         return;
@@ -1042,6 +1035,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       event.target.enterEditing();
       event.target.selectAll();
       event.target.hiddenTextarea?.focus();
+      applyITextLocaleToObject(event.target);
       textCanvas.requestRenderAll();
       queueSaveDocument();
     });
@@ -1232,18 +1226,16 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         if (cancelled) {
           return;
         }
-        const rows =
-          (data ?? []).map((row) => ({
+        const rows = (data ?? []).map((row) =>
+          supabaseRowToCanvasObject({
             id: String(row.id),
             drawing_id: String(row.drawing_id),
             object_id: String(row.object_id),
-            layer: row.layer as "img" | "text" | "draw",
-            payload: (row.payload ?? {}) as Record<string, unknown>,
+            layer: String(row.layer),
+            payload: row.payload,
             updated_at: String(row.updated_at ?? new Date().toISOString()),
-            dirty: false,
-            last_sync_tstamp:
-              row.last_sync_tstamp != null ? String(row.last_sync_tstamp) : null,
-          })) ?? [];
+          }),
+        );
         await replaceDrawingCanvasObjectsLocal(drawingIdToLoad, rows);
       } catch (e) {
         console.warn("Failed to hydrate Dexie from Supabase canvas_objects:", e);
@@ -1471,6 +1463,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       setTextIdleVisuals(newText);
       newText.on("editing:entered", () => {
         setTextEditingVisuals(newText);
+        applyITextLocaleToObject(newText);
         textCanvas.requestRenderAll();
         recalcDocumentHeightRef.current?.();
         requestSaveRef.current?.();
@@ -1491,6 +1484,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       textCanvas.add(newText);
       textCanvas.setActiveObject(newText);
       newText.enterEditing();
+      applyITextLocaleToObject(newText);
       textCanvas.requestRenderAll();
       recalcDocumentHeightRef.current?.();
       requestSaveRef.current?.();

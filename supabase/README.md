@@ -1,8 +1,13 @@
 ## Supabase Jobs
 
-### 1) Apply migration
+### 1) Apply migrations (in order)
 
-Run SQL from `supabase/migrations/20260424_drawings_owner_rls_and_draft_cleanup.sql`.
+1. `supabase/migrations/20260424_drawings_owner_rls_and_draft_cleanup.sql` (drawings + `owner_token`)
+2. `supabase/migrations/20260425_canvas_objects_rls_by_drawing.sql` (RLS on `canvas_objects` by `drawing_id` + same `x-owner-token` as parent `drawings` row)
+
+For **Realtime** on `canvas_objects`, if not already added:
+
+`alter publication supabase_realtime add table public.canvas_objects;`
 
 ### 2) Deploy Edge Function
 

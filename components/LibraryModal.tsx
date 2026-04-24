@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { FolderOpen, Loader2, RefreshCw, Share2, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useLocale } from "../contexts/LocaleContext";
 import { type DrawingRow, listDrawings } from "../utils/drawingsApi";
 import { supabase } from "../utils/supabaseClient";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
 
 export default function LibraryModal() {
+  const { t, localeBcp47 } = useLocale();
   const { isOpen, close } = useLibraryModal();
   const router = useRouter();
   const titleId = useId();
@@ -23,12 +25,12 @@ export default function LibraryModal() {
       const data = await listDrawings(100);
       setRows(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка загрузки");
+      setError(e instanceof Error ? e.message : t("library.loadErrDef"));
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (isOpen) {
@@ -59,7 +61,11 @@ export default function LibraryModal() {
     const url = `${origin}/?id=${encodeURIComponent(id)}`;
     try {
       if (typeof navigator !== "undefined" && navigator.share) {
-        await navigator.share({ title: "MyBoard", text: "Ссылка на работу", url });
+        await navigator.share({
+          title: t("lib.shareSystemTitle"),
+          text: t("lib.shareWork"),
+          url,
+        });
         return;
       }
     } catch (e) {
@@ -71,17 +77,13 @@ export default function LibraryModal() {
     try {
       await navigator.clipboard.writeText(url);
     } catch {
-      window.prompt("Ссылка на работу", url);
+      window.prompt(t("lib.promptLink"), url);
     }
   };
 
   const onDelete = async (row: DrawingRow) => {
-    const label = row.name || "без названия";
-    if (
-      !window.confirm(
-        `Удалить работу «${label}»? Действие нельзя отменить.`,
-      )
-    ) {
+    const label = row.name || t("library.unnamed");
+    if (!window.confirm(t("library.deleteConfirm", { name: label }))) {
       return;
     }
     const rowId = row.id;
@@ -121,7 +123,7 @@ export default function LibraryModal() {
         className="absolute inset-0 cursor-default bg-black/40 backdrop-blur-[2px]"
         onClick={close}
         tabIndex={-1}
-        aria-label="Закрыть (фон)"
+        aria-label={t("library.closeBg")}
       />
       <div
         className="relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-2xl shadow-gray-200/50"
@@ -131,8 +133,8 @@ export default function LibraryModal() {
           type="button"
           onClick={close}
           className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
-          title="Закрыть"
-          aria-label="Закрыть"
+          title={t("dialog.close")}
+          aria-label={t("dialog.close")}
         >
           <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
         </button>
@@ -141,17 +143,17 @@ export default function LibraryModal() {
             id={titleId}
             className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl"
           >
-            Библиотека
+            {t("library.title")}
           </h2>
-          <p className="mt-1 text-sm text-gray-500">Сохранённые работы</p>
+          <p className="mt-1 text-sm text-gray-500">{t("library.sub")}</p>
         </div>
         <div className="absolute right-14 top-3 z-10">
           <button
             type="button"
             onClick={() => void loadDrawings()}
             className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
-            title="Обновить"
-            aria-label="Обновить список"
+            title={t("library.refresh")}
+            aria-label={t("library.refreshAria")}
           >
             <RefreshCw className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           </button>
@@ -160,12 +162,14 @@ export default function LibraryModal() {
           {loading ? (
             <div className="flex items-center gap-2 py-2 text-gray-400" aria-busy="true" aria-live="polite">
               <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={1.75} aria-hidden />
-              <span className="sr-only">Загрузка списка</span>
+              <span className="sr-only">{t("library.loadList")}</span>
             </div>
           ) : error ? (
-            <p className="text-sm text-red-600/90">Ошибка: {error}</p>
+            <p className="text-sm text-red-600/90">
+              {t("library.loadErr")}: {error}
+            </p>
           ) : rows.length === 0 ? (
-            <p className="text-sm text-gray-500">Пока нет работ.</p>
+            <p className="text-sm text-gray-500">{t("library.empty")}</p>
           ) : (
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {rows.map((row) => {
@@ -181,23 +185,23 @@ export default function LibraryModal() {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={row.preview_url}
-                          alt={row.name || "Превью работы"}
+                          alt={row.name || t("library.preview")}
                           className="h-full w-full object-cover"
                           loading="lazy"
                         />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
-                          Нет превью
+                          {t("library.noPreview")}
                         </div>
                       )}
                     </div>
                     <h3 className="line-clamp-2 min-h-0 text-sm font-bold leading-snug text-gray-900">
-                      {row.name || "Без названия"}
+                      {row.name || t("library.unnamed")}
                     </h3>
                     <div className="mt-auto w-full pt-4">
                       <p className="text-xs leading-relaxed text-gray-500">
                         {row.created_at
-                          ? new Date(row.created_at).toLocaleString("ru-RU", {
+                          ? new Date(row.created_at).toLocaleString(localeBcp47, {
                               dateStyle: "medium",
                               timeStyle: "short",
                             })
@@ -208,8 +212,10 @@ export default function LibraryModal() {
                           type="button"
                           onClick={() => openOnBoard(row.id)}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
-                          title="Открыть на холсте"
-                          aria-label={`Открыть «${row.name}» на холсте`}
+                          title={t("library.open")}
+                          aria-label={t("library.openAria", {
+                            name: row.name || t("library.unnamed"),
+                          })}
                           disabled={busy}
                         >
                           <FolderOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -218,8 +224,8 @@ export default function LibraryModal() {
                           type="button"
                           onClick={() => void shareDrawingLink(row.id)}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
-                          title="Поделиться ссылкой"
-                          aria-label={`Поделиться ссылкой на «${row.name}»`}
+                          title={t("library.share")}
+                          aria-label={t("library.shareAria", { name: row.name || t("library.unnamed") })}
                           disabled={busy}
                         >
                           <Share2 className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -229,8 +235,8 @@ export default function LibraryModal() {
                           onClick={() => void onDelete(row)}
                           disabled={busy}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-                          title="Удалить"
-                          aria-label={`Удалить «${row.name}»`}
+                          title={t("library.delete")}
+                          aria-label={t("library.deleteAria", { name: row.name || t("library.unnamed") })}
                         >
                           {busy ? (
                             <Loader2

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ChevronDown,
   CircleAlert,
   Download,
   Eraser,
@@ -23,7 +22,9 @@ import {
   Undo2,
   X,
 } from "lucide-react";
+import { useLocale } from "../contexts/LocaleContext";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
+import { LanguagePicker } from "./LanguagePicker";
 import { cn } from "../utils/cn";
 import { ROOM_PARAM } from "../hooks/useCollaboration";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -145,6 +146,7 @@ export default function StudioConsole({
   onNewDocument,
 }: StudioConsoleProps) {
   const path = usePathname();
+  const { t } = useLocale();
   const { isOpen: libraryOpen, open: openLibrary } = useLibraryModal();
   const isHome = path === "/";
   const isLibrary = libraryOpen;
@@ -189,8 +191,8 @@ export default function StudioConsole({
             : "border-zinc-200/80 bg-white text-zinc-600",
       )}
       role="status"
-      aria-label={`Пользователей в сети: ${collabParticipants} из ${maxRoomParticipants}`}
-      title="Участники в комнате"
+      aria-label={t("room.participantsAria", { a: collabParticipants, b: maxRoomParticipants })}
+      title={t("room.participantsTitle")}
     >
       <span
         className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_0_1px_rgba(0,0,0,0.04)]"
@@ -228,7 +230,7 @@ export default function StudioConsole({
     <div
       className="mr-0.5 flex h-6 w-3 shrink-0 flex-col gap-px"
       role="group"
-      aria-label="Толщина карандаша"
+      aria-label={t("pencil.groupWidth")}
     >
       {([1, 3, 5] as const).map((w) => (
         <button
@@ -239,9 +241,9 @@ export default function StudioConsole({
             "flex min-h-0 flex-1 w-full items-center justify-center rounded-sm border-0 p-0 transition outline-none",
             pencilWidth === w ? "bg-zinc-200 ring-1 ring-inset ring-zinc-400/50" : "hover:bg-zinc-100",
           )}
-          title={`Толщина ${w} px`}
+          title={t("pencil.width", { w })}
           aria-pressed={pencilWidth === w}
-          aria-label={`Толщина линии ${w} px`}
+          aria-label={t("pencil.widthLine", { w })}
         >
           <span className="block h-px w-full max-w-[11px] rounded-full bg-zinc-900" aria-hidden />
         </button>
@@ -321,9 +323,6 @@ export default function StudioConsole({
 
   const [refreshErrorFlash, setRefreshErrorFlash] = useState(false);
   const [sharePanelOpen, setSharePanelOpen] = useState(false);
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
-  const exportWrapRef = useRef<HTMLDivElement | null>(null);
-  const exportLeaveTimerRef = useRef<number | null>(null);
   const [navMoreOpen, setNavMoreOpen] = useState(false);
   const [navMorePos, setNavMorePos] = useState<{ top: number; left: number } | null>(null);
   const navMoreAnchorRef = useRef<HTMLElement | null>(null);
@@ -424,26 +423,6 @@ export default function StudioConsole({
     setMobileFabOpen((prev) => !prev);
   };
 
-  const clearExportLeaveTimer = () => {
-    if (exportLeaveTimerRef.current != null) {
-      window.clearTimeout(exportLeaveTimerRef.current);
-      exportLeaveTimerRef.current = null;
-    }
-  };
-
-  const openExportMenu = () => {
-    clearExportLeaveTimer();
-    setExportMenuOpen(true);
-  };
-
-  const scheduleCloseExportMenu = () => {
-    clearExportLeaveTimer();
-    exportLeaveTimerRef.current = window.setTimeout(() => {
-      setExportMenuOpen(false);
-      exportLeaveTimerRef.current = null;
-    }, 240);
-  };
-
   const NAV_MORE_MENU_W = 232;
 
   const layoutNavMore = useCallback(() => {
@@ -460,7 +439,6 @@ export default function StudioConsole({
     setNavMoreOpen(false);
     setNavMorePos(null);
     navMoreAnchorRef.current = null;
-    setExportMenuOpen(false);
     setSaveNameOpen(false);
   }, []);
 
@@ -528,23 +506,8 @@ export default function StudioConsole({
       clearFabLongPressTimer();
       clearPanelLongPressTimer();
       clearDragTimer();
-      clearExportLeaveTimer();
     };
   }, []);
-
-  useEffect(() => {
-    if (!exportMenuOpen || typeof document === "undefined") {
-      return;
-    }
-    const onDocPointer = (e: PointerEvent) => {
-      const el = exportWrapRef.current;
-      if (el && !el.contains(e.target as Node)) {
-        setExportMenuOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onDocPointer, true);
-    return () => document.removeEventListener("pointerdown", onDocPointer, true);
-  }, [exportMenuOpen]);
 
   useEffect(() => {
     if (!sharePanelOpen) {
@@ -602,11 +565,11 @@ export default function StudioConsole({
       flashRefreshError();
       return false;
     }
-    const text = `Присоединяйся к моей работе в MyBoard! Ссылка: ${url}`;
+    const text = t("share.joinText", { url });
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({
-          title: "MyBoard",
+          title: t("lib.shareSystemTitle"),
           text,
           url,
         });
@@ -631,12 +594,13 @@ export default function StudioConsole({
     <>
       <div className={innerGroup}>
         {pencilWidthStripeControl}
-        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title="Карандаш" aria-hidden>
+        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title={t("pencil.aria")} aria-hidden>
           <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} />
         </span>
-        <div className="grid grid-cols-3 grid-rows-2 gap-0.5" role="group" aria-label="Цвет карандаша">
+        <div className="grid grid-cols-3 grid-rows-2 gap-0.5" role="group" aria-label={t("pencil.colors")}>
           {PENCIL_SWATCHES.map((sw) => {
             const selected = isPencilActive && pencilColor === sw.color;
+            const cname = t(`color.${sw.key}`);
             return (
               <button
                 key={sw.key}
@@ -644,8 +608,8 @@ export default function StudioConsole({
                 onClick={() => onPaletteColor(sw.color)}
                 className={`h-2 w-2 border-0 p-0 transition ${selected ? "ring-1 ring-inset ring-zinc-800 ring-offset-0" : "ring-0 hover:opacity-90"} rounded-sm`}
                 style={{ backgroundColor: sw.color }}
-                title={`Карандаш: ${sw.key}`}
-                aria-label={`Карандаш, цвет ${sw.key}`}
+                title={t("pencil.swatch", { c: cname })}
+                aria-label={t("pencil.swatch", { c: cname })}
                 aria-pressed={selected}
               />
             );
@@ -655,9 +619,9 @@ export default function StudioConsole({
           type="button"
           onClick={onEraser}
           className={`${toolButtonBase} ml-0.5 h-6 w-6 ${isEraserActive ? toolButtonActive : toolButtonInactive}`}
-          title="Ластик"
+          title={t("eraser.aria")}
           aria-pressed={isEraserActive}
-          aria-label="Ластик"
+          aria-label={t("eraser.aria")}
         >
           <Eraser className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
         </button>
@@ -665,14 +629,14 @@ export default function StudioConsole({
 
       <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
         <PopoverTrigger asChild>
-          <button type="button" className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`} title="Настройки кисти" aria-label="Настройки кисти">
+          <button type="button" className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`} title={t("settings.brush")} aria-label={t("settings.brush")}>
             <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-60">
           <div className="space-y-3">
             <div>
-              <p className="mb-1 text-xs font-medium text-zinc-700">Толщина (shadcn Slider)</p>
+              <p className="mb-1 text-xs font-medium text-zinc-700">{t("settings.widthLabel")}</p>
               <Slider
                 value={[pencilWidth]}
                 min={1}
@@ -682,7 +646,7 @@ export default function StudioConsole({
               />
             </div>
             <div>
-              <p className="mb-1 text-xs font-medium text-zinc-700">Цвет (shadcn ColorPicker)</p>
+              <p className="mb-1 text-xs font-medium text-zinc-700">{t("settings.colorLabel")}</p>
               <ColorPicker color={pencilColor} onChange={onPaletteColor} />
             </div>
           </div>
@@ -698,7 +662,7 @@ export default function StudioConsole({
           <Link
             href="/"
             className={cn(myBoardChipClass(), "min-h-9 shrink-0 px-2 text-xs")}
-            title="MyBoard"
+            title={t("myBoard.hint")}
             aria-current={isHome ? "page" : undefined}
             onClick={(e) => {
               if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.button !== 0) {
@@ -723,16 +687,23 @@ export default function StudioConsole({
             onPointerLeave={clearMyBoardLongTimer}
             onPointerCancel={clearMyBoardLongTimer}
           >
-            MyBoard
+            {t("nav.myBoard")}
           </Link>
+          <LanguagePicker
+            className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+            labelAria={t("locale.title")}
+            labelTitle={t("locale.title")}
+            dark={dark}
+            ivory={ivory}
+          />
           <button
             type="button"
             onClick={() => {
               void onNewDocument?.();
             }}
             className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-            title="Новая работа"
-            aria-label="Новая работа"
+            title={t("nav.newDoc")}
+            aria-label={t("nav.newDoc")}
           >
             <Plus className="h-5 w-5" strokeWidth={ICON} aria-hidden />
           </button>
@@ -740,8 +711,8 @@ export default function StudioConsole({
             type="button"
             onClick={(e) => toggleNavMore(e.currentTarget)}
             className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-            title="Ещё: поделиться, политика, сохранить, скачать"
-            aria-label="Ещё: поделиться, политика, сохранить, скачать"
+            title={t("nav.more")}
+            aria-label={t("nav.more")}
             aria-expanded={navMoreOpen}
             aria-haspopup="menu"
           >
@@ -751,8 +722,8 @@ export default function StudioConsole({
             type="button"
             onClick={openLibrary}
             className={`${navLinkClass(isLibrary)} h-9 w-9 gap-0 p-0 shadow-md`}
-            title="Библиотека работ"
-            aria-label="Библиотека работ"
+            title={t("nav.library")}
+            aria-label={t("nav.library")}
           >
             <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
@@ -761,8 +732,8 @@ export default function StudioConsole({
             disabled={!canUndo}
             onClick={() => onUndo()}
             className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
-            title="Отменить (до 5 шагов)"
-            aria-label="Отменить последнее действие"
+            title={t("nav.undo")}
+            aria-label={t("nav.undo")}
           >
             <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
@@ -793,7 +764,7 @@ export default function StudioConsole({
             onPointerUpCapture={endDragHold}
             onPointerCancelCapture={endDragHold}
           >
-            <div className="flex w-full flex-wrap items-center gap-1.5" role="toolbar" aria-label="Мобильные инструменты">
+            <div className="flex w-full flex-wrap items-center gap-1.5" role="toolbar" aria-label={t("mobile.tools")}>
               {toolbarContent}
               <button type="button" onClick={onAddText} className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}><Type className="h-4 w-4" strokeWidth={ICON} /></button>
               <button type="button" onClick={onAddImage} className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}><ImageIcon className="h-4 w-4" strokeWidth={ICON} /></button>
@@ -802,8 +773,8 @@ export default function StudioConsole({
                 disabled={!canUndo}
                 onClick={() => onUndo()}
                 className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive} disabled:cursor-not-allowed disabled:opacity-40`}
-                title="Отменить"
-                aria-label="Отменить последнее действие"
+                title={t("mobile.undo")}
+                aria-label={t("nav.undo")}
               >
                 <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
               </button>
@@ -821,8 +792,8 @@ export default function StudioConsole({
           onPointerCancelCapture={endDragHold}
           onClick={toggleFab}
           className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-zinc-900 text-white shadow-xl"
-          aria-label={mobileFabOpen ? "Свернуть инструменты" : "Открыть инструменты"}
-          title={mobileFabPinned ? "Панель закреплена" : "Открыть инструменты (долгое нажатие закрепляет)"}
+          aria-label={mobileFabOpen ? t("mobile.fab.close") : t("mobile.fab.open")}
+          title={mobileFabPinned ? t("mobile.fab.pinned") : t("mobile.fab.open")}
         >
           {mobileFabOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
@@ -833,7 +804,7 @@ export default function StudioConsole({
           "fixed inset-x-0 top-0 z-[70] hidden backdrop-blur sm:block",
           ivory ? "border-b border-stone-200/80 bg-[#ebe6d8]/95" : dark ? "border-b border-zinc-800 bg-zinc-900/90" : "bg-zinc-100/90",
         )}
-        aria-label="Панель навигации и инструментов"
+        aria-label={t("header.aria")}
       >
         <div
           className={cn(
@@ -845,76 +816,86 @@ export default function StudioConsole({
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
               <Link
                 href="/"
-                className={cn(myBoardChipClass(), isHome && "ring-2 ring-zinc-400 ring-offset-2 ring-offset-transparent")}
-              title="MyBoard: нажать — инверсия; долгое — режим для глаз"
-              aria-current={isHome ? "page" : undefined}
-              onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.button !== 0) {
-                  return;
-                }
-                e.preventDefault();
-                if (myBoardLongConsumedRef.current) {
+                className={cn(
+                  myBoardChipClass(),
+                  isHome && "ring-2 ring-zinc-400 ring-offset-2 ring-offset-transparent",
+                )}
+                title={t("myBoard.hint")}
+                aria-current={isHome ? "page" : undefined}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.button !== 0) {
+                    return;
+                  }
+                  e.preventDefault();
+                  if (myBoardLongConsumedRef.current) {
+                    myBoardLongConsumedRef.current = false;
+                    return;
+                  }
+                  onMyBoardInvert();
+                }}
+                onPointerDown={() => {
+                  clearMyBoardLongTimer();
                   myBoardLongConsumedRef.current = false;
-                  return;
-                }
-                onMyBoardInvert();
-              }}
-              onPointerDown={() => {
-                clearMyBoardLongTimer();
-                myBoardLongConsumedRef.current = false;
-                myBoardLongTimerRef.current = window.setTimeout(() => {
-                  myBoardLongConsumedRef.current = true;
-                  onMyBoardComfort();
-                }, 650);
-              }}
-              onPointerUp={clearMyBoardLongTimer}
-              onPointerLeave={clearMyBoardLongTimer}
-              onPointerCancel={clearMyBoardLongTimer}
-            >
-              MyBoard
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                void onNewDocument?.();
-              }}
-              className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-              title="Новая работа"
-              aria-label="Новая работа"
-            >
-              <Plus className="h-5 w-5" strokeWidth={ICON} aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => toggleNavMore(e.currentTarget)}
-              className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-              title="Ещё: поделиться, политика, сохранить, скачать"
-              aria-label="Ещё: поделиться, политика, сохранить, скачать"
-              aria-expanded={navMoreOpen}
-              aria-haspopup="menu"
-            >
-              <List className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={openLibrary}
-              className={`${navLinkClass(isLibrary)} h-9 w-9 gap-0 p-0 shadow-md`}
-              title="Библиотека работ"
-              aria-label="Библиотека работ"
-              aria-pressed={isLibrary}
-            >
-              <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-            </button>
-            <button
-              type="button"
-              disabled={!canUndo}
-              onClick={() => onUndo()}
-              className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
-              title="Отменить (до 5 шагов)"
-              aria-label="Отменить последнее действие"
-            >
-              <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-            </button>
+                  myBoardLongTimerRef.current = window.setTimeout(() => {
+                    myBoardLongConsumedRef.current = true;
+                    onMyBoardComfort();
+                  }, 650);
+                }}
+                onPointerUp={clearMyBoardLongTimer}
+                onPointerLeave={clearMyBoardLongTimer}
+                onPointerCancel={clearMyBoardLongTimer}
+              >
+                {t("nav.myBoard")}
+              </Link>
+              <LanguagePicker
+                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+                labelAria={t("locale.title")}
+                labelTitle={t("locale.title")}
+                dark={dark}
+                ivory={ivory}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void onNewDocument?.();
+                }}
+                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+                title={t("nav.newDoc")}
+                aria-label={t("nav.newDoc")}
+              >
+                <Plus className="h-5 w-5" strokeWidth={ICON} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => toggleNavMore(e.currentTarget)}
+                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+                title={t("nav.more")}
+                aria-label={t("nav.more")}
+                aria-expanded={navMoreOpen}
+                aria-haspopup="menu"
+              >
+                <List className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={openLibrary}
+                className={`${navLinkClass(isLibrary)} h-9 w-9 gap-0 p-0 shadow-md`}
+                title={t("nav.library")}
+                aria-label={t("nav.library")}
+                aria-pressed={isLibrary}
+              >
+                <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
+              <button
+                type="button"
+                disabled={!canUndo}
+                onClick={() => onUndo()}
+                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
+                title={t("nav.undo")}
+                aria-label={t("nav.undo")}
+              >
+                <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
             </div>
             {participantStatusPill}
           </div>
@@ -925,19 +906,20 @@ export default function StudioConsole({
               boardToolbarMaxClass,
             )}
           >
-            <div className={floatingToolbar} role="toolbar" aria-label="Инструменты">
+            <div className={floatingToolbar} role="toolbar" aria-label={t("header.mainToolbar")}>
             <div className={innerGroup}>
               {pencilWidthStripeControl}
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title="Карандаш" aria-hidden>
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title={t("pencil.aria")} aria-hidden>
                 <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} />
               </span>
               <div
                 className="grid grid-cols-3 grid-rows-2 gap-0.5"
                 role="group"
-                aria-label="Цвет карандаша"
+                aria-label={t("pencil.colors")}
               >
                 {PENCIL_SWATCHES.map((sw) => {
                   const selected = isPencilActive && pencilColor === sw.color;
+                  const cname = t(`color.${sw.key}`);
                   return (
                     <button
                       key={sw.key}
@@ -949,8 +931,8 @@ export default function StudioConsole({
                           : "ring-0 hover:opacity-90"
                       } rounded-sm`}
                       style={{ backgroundColor: sw.color }}
-                      title={`Карандаш: ${sw.key}`}
-                      aria-label={`Карандаш, цвет ${sw.key}`}
+                      title={t("pencil.swatch", { c: cname })}
+                      aria-label={t("pencil.swatch", { c: cname })}
                       aria-pressed={selected}
                     />
                   );
@@ -962,15 +944,15 @@ export default function StudioConsole({
                 className={`${toolButtonBase} ml-0.5 h-6 w-6 ${
                   isEraserActive ? toolButtonActive : toolButtonInactive
                 }`}
-                title="Ластик"
+                title={t("eraser.aria")}
                 aria-pressed={isEraserActive}
-                aria-label="Ластик"
+                aria-label={t("eraser.aria")}
               >
                 <Eraser className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
               </button>
             </div>
 
-            <div className={innerGroup} role="group" aria-label="Размер текста">
+            <div className={innerGroup} role="group" aria-label={t("text.sizeGroup")}>
               <div className="flex h-8 min-h-8 min-w-0 items-center justify-center gap-0.5">
                 <button
                   type="button"
@@ -978,9 +960,9 @@ export default function StudioConsole({
                   className={`flex h-6 w-6 shrink-0 items-center justify-center border-0 text-zinc-900 outline-none transition ${
                     textFontSize === 10 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`
                   }`}
-                  title="Размер 10 px"
+                  title={t("text.sizeN", { n: 10 })}
                   aria-pressed={textFontSize === 10}
-                  aria-label="Весь текст 10 px"
+                  aria-label={t("text.allN", { n: 10 })}
                 >
                   <Type className="h-2.5 w-2.5 shrink-0" strokeWidth={ICON} aria-hidden />
                 </button>
@@ -990,9 +972,9 @@ export default function StudioConsole({
                   className={`flex h-6 w-6 shrink-0 items-center justify-center border-0 text-zinc-900 outline-none transition ${
                     textFontSize === 14 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`
                   }`}
-                  title="Размер 14 px"
+                  title={t("text.sizeN", { n: 14 })}
                   aria-pressed={textFontSize === 14}
-                  aria-label="Весь текст 14 px"
+                  aria-label={t("text.allN", { n: 14 })}
                 >
                   <Type className="h-3 w-3 shrink-0" strokeWidth={ICON} aria-hidden />
                 </button>
@@ -1002,9 +984,9 @@ export default function StudioConsole({
                   className={`flex h-6 w-6 shrink-0 items-center justify-center border-0 text-zinc-900 outline-none transition ${
                     textFontSize === 18 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`
                   }`}
-                  title="Размер 18 px"
+                  title={t("text.sizeN", { n: 18 })}
                   aria-pressed={textFontSize === 18}
-                  aria-label="Весь текст 18 px"
+                  aria-label={t("text.allN", { n: 18 })}
                 >
                   <Type className="h-3.5 w-3.5 shrink-0" strokeWidth={ICON} aria-hidden />
                 </button>
@@ -1014,8 +996,8 @@ export default function StudioConsole({
                   className={`ml-0.5 flex h-6 w-6 items-center justify-center border-0 p-0 text-zinc-900 outline-none transition ${
                     activeTool === "text" ? toolButtonActive : `rounded-md ${toolButtonInactive}`
                   } rounded-md`}
-                  title="Новый абзац"
-                  aria-label="Вставить новый текст"
+                  title={t("text.newBlock")}
+                  aria-label={t("text.addNew")}
                 >
                   <Plus className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
                 </button>
@@ -1027,8 +1009,8 @@ export default function StudioConsole({
                 type="button"
                 onClick={onAddImage}
                 className={`${toolButtonBase} h-6 w-6 ${toolButtonInactive} rounded-md`}
-                title="Вставить изображение"
-                aria-label="Вставить изображение"
+                title={t("image.add")}
+                aria-label={t("image.add")}
               >
                 <ImageIcon className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
               </button>
@@ -1040,9 +1022,9 @@ export default function StudioConsole({
                     ? "bg-red-100 text-red-700 hover:bg-red-50"
                     : `${toolButtonInactive}`
                 } rounded-md`}
-                title="Удалить изображение"
+                title={t("image.removeMode")}
                 aria-pressed={isImageDeleteMode}
-                aria-label="Режим удаления изображений"
+                aria-label={t("image.removeAria")}
               >
                 <Trash2 className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
               </button>
@@ -1056,7 +1038,7 @@ export default function StudioConsole({
         <div
           id="nav-console-more-menu"
           role="menu"
-          aria-label="Дополнительные действия"
+          aria-label={t("nav.ariaMore")}
           className="fixed z-[96] max-h-[min(90vh,calc(100vh-4rem))] overflow-y-auto rounded-xl border border-zinc-200 bg-white py-1.5 shadow-xl"
           style={{
             top: navMorePos.top,
@@ -1075,7 +1057,7 @@ export default function StudioConsole({
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
             >
               <Share2 className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
-              <span>Поделиться</span>
+              <span>{t("action.share")}</span>
             </button>
             <Link
               href="/privacy"
@@ -1084,7 +1066,7 @@ export default function StudioConsole({
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-zinc-800 transition hover:bg-zinc-50"
             >
               <CircleAlert className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
-              <span>Политика конфиденциальности</span>
+              <span>{t("action.privacy")}</span>
             </Link>
             <div className="my-1 h-px shrink-0 bg-zinc-200" aria-hidden />
             <div className="relative w-full px-0.5" ref={saveGroupRef}>
@@ -1099,24 +1081,24 @@ export default function StudioConsole({
                       ? "bg-zinc-200 text-zinc-900"
                       : "text-zinc-800 hover:bg-zinc-50"
                 }`}
-                title="Сохранить в базу"
+                title={t("action.saveHint")}
                 aria-expanded={saveNameOpen}
                 aria-controls={saveNameOpen ? popoverId : undefined}
-                aria-label="Сохранить в базу: задать название"
+                aria-label={t("action.saveHint")}
               >
                 {isSavingToDrawings ? (
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={ICON} aria-hidden />
                 ) : (
                   <Save className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
                 )}
-                <span>Сохранить в базу</span>
+                <span>{t("action.save")}</span>
               </button>
               {saveNameOpen && !isSavingToDrawings ? (
                 <div
                   id={popoverId}
                   className="absolute left-0 right-0 top-full z-[80] mt-1.5 rounded-md border border-zinc-200 bg-white p-2 shadow-lg"
                   role="region"
-                  aria-label="Название работы"
+                  aria-label={t("form.workName")}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
@@ -1125,7 +1107,7 @@ export default function StudioConsole({
                   }}
                 >
                   <label className="block text-xs font-medium text-zinc-700" htmlFor={`${popoverId}-input`}>
-                    Название работы
+                    {t("form.workName")}
                   </label>
                   <div className="mt-1 flex items-center gap-1.5">
                     <input
@@ -1142,8 +1124,8 @@ export default function StudioConsole({
                       type="button"
                       onClick={handleConfirmSave}
                       className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-800 bg-zinc-900 text-white transition hover:bg-zinc-800"
-                      title="Сохранить"
-                      aria-label="Подтвердить сохранение"
+                      title={t("form.confirm")}
+                      aria-label={t("form.confirmSave")}
                     >
                       <Save className="h-4 w-4" strokeWidth={ICON} aria-hidden />
                     </button>
@@ -1151,73 +1133,49 @@ export default function StudioConsole({
                 </div>
               ) : null}
             </div>
-            <div
-              ref={exportWrapRef}
-              className="relative w-full px-0.5"
-              onMouseEnter={openExportMenu}
-              onMouseLeave={scheduleCloseExportMenu}
-            >
+            <div className="flex w-full flex-col gap-0.5 px-0.5" role="group" aria-label={t("export.aria")}>
               <button
                 type="button"
-                className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
-                title="Скачать документ (PNG, JPG или PDF)"
-                aria-label="Скачать документ"
-                aria-expanded={exportMenuOpen}
-                aria-haspopup="menu"
-                onClick={() => setExportMenuOpen((o) => !o)}
+                role="menuitem"
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
+                title={t("export.png")}
+                aria-label={t("export.png")}
+                onClick={() => {
+                  closeNavMore();
+                  void Promise.resolve(onExportBoard("png"));
+                }}
               >
-                <span className="inline-flex items-center gap-2.5">
-                  <Download className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
-                  Скачать
-                </span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" strokeWidth={ICON} aria-hidden />
+                <Download className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
+                <span>{t("export.png")}</span>
               </button>
-              {exportMenuOpen ? (
-                <div
-                  className="absolute left-0 right-0 top-full z-[95] mt-1 rounded-md border border-zinc-200 bg-white py-1 shadow-lg"
-                  role="menu"
-                  aria-label="Формат файла"
-                  onMouseEnter={openExportMenu}
-                  onMouseLeave={scheduleCloseExportMenu}
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
-                    onClick={() => {
-                      setExportMenuOpen(false);
-                      closeNavMore();
-                      void Promise.resolve(onExportBoard("png"));
-                    }}
-                  >
-                    PNG
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
-                    onClick={() => {
-                      setExportMenuOpen(false);
-                      closeNavMore();
-                      void Promise.resolve(onExportBoard("jpeg"));
-                    }}
-                  >
-                    JPG
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
-                    onClick={() => {
-                      setExportMenuOpen(false);
-                      closeNavMore();
-                      void Promise.resolve(onExportBoard("pdf"));
-                    }}
-                  >
-                    PDF
-                  </button>
-                </div>
-              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
+                title={t("export.jpg")}
+                aria-label={t("export.jpg")}
+                onClick={() => {
+                  closeNavMore();
+                  void Promise.resolve(onExportBoard("jpeg"));
+                }}
+              >
+                <Download className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
+                <span>{t("export.jpg")}</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
+                title={t("export.pdf")}
+                aria-label={t("export.pdf")}
+                onClick={() => {
+                  closeNavMore();
+                  void Promise.resolve(onExportBoard("pdf"));
+                }}
+              >
+                <Download className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
+                <span>{t("export.pdf")}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1231,7 +1189,7 @@ export default function StudioConsole({
           <button
             type="button"
             className="absolute inset-0 cursor-default bg-black/50 backdrop-blur-[2px]"
-            aria-label="Закрыть окно"
+            aria-label={t("dialog.closeBg")}
             onClick={() => setSharePanelOpen(false)}
           />
           <div
@@ -1243,36 +1201,36 @@ export default function StudioConsole({
           >
             <div className="flex items-start justify-between gap-3">
               <h2 id={sharePanelTitleId} className="text-lg font-semibold text-zinc-900">
-                Поделиться
+                {t("share.title")}
               </h2>
               <button
                 type="button"
                 onClick={() => setSharePanelOpen(false)}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-                title="Закрыть"
-                aria-label="Закрыть"
+                title={t("dialog.close")}
+                aria-label={t("dialog.close")}
               >
                 <X className="h-4 w-4" strokeWidth={ICON} aria-hidden />
               </button>
             </div>
             <p className="mt-1 text-sm text-zinc-500">
-              Скопируйте номер комнаты и ссылку-приглашение для коллег.
+              {t("share.body")}
             </p>
 
             <div className="mt-4 space-y-4">
               <div>
-                <p className="text-xs font-medium text-zinc-500">Номер комнаты</p>
+                <p className="text-xs font-medium text-zinc-500">{t("share.roomLabel")}</p>
                 <p className="mt-1 break-all font-mono text-sm text-zinc-900">{collabRoomId}</p>
                 <button
                   type="button"
                   onClick={() => void copyRoomIdToClipboard()}
                   className="mt-2 w-full rounded-lg border border-zinc-300 bg-zinc-50 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-100"
                 >
-                  Копировать номер
+                  {t("share.copyRoom")}
                 </button>
               </div>
               <div>
-                <p className="text-xs font-medium text-zinc-500">Ссылка-приглашение</p>
+                <p className="text-xs font-medium text-zinc-500">{t("share.inviteLabel")}</p>
                 <p className="mt-1 max-h-24 overflow-y-auto break-all font-mono text-xs leading-relaxed text-zinc-700">
                   {buildRoomInviteUrl() ?? "—"}
                 </p>
@@ -1282,14 +1240,14 @@ export default function StudioConsole({
                   disabled={!buildRoomInviteUrl()}
                   className="mt-2 w-full rounded-lg border border-zinc-300 bg-zinc-50 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Копировать ссылку
+                  {t("share.copyLink")}
                 </button>
               </div>
             </div>
 
             {roomFull ? (
               <p className="mt-3 text-xs font-medium text-amber-700">
-                Комната заполнена (макс. {maxRoomParticipants} участников).
+                {t("share.roomFull", { max: maxRoomParticipants })}
               </p>
             ) : null}
 
@@ -1304,14 +1262,14 @@ export default function StudioConsole({
                 }}
                 className="inline-flex w-full items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 sm:w-auto"
               >
-                Меню «Поделиться» устройства
+                {t("share.native")}
               </button>
               <button
                 type="button"
                 onClick={() => setSharePanelOpen(false)}
                 className="inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 sm:w-auto"
               >
-                Готово
+                {t("share.done")}
               </button>
             </div>
           </div>
