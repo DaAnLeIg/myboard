@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   title: "MyBoard",
   description: "Canvas board for drawings, text, and images.",
   manifest: "/manifest.json",
-  themeColor: "#2563eb",
+  themeColor: "#000000",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -25,10 +25,12 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
       { url: "/app-icon.svg", type: "image/svg+xml" },
       { url: "/favicon.ico" },
     ],
-    apple: [{ url: "/app-icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
     shortcut: ["/favicon.ico"],
   },
 };
