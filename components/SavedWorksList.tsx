@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useSavedWorksRefresh } from "../contexts/SavedWorksRefreshContext";
 import { listDrawings, type DrawingRow } from "../utils/drawingsApi";
 
 type SavedWorksListProps = {
@@ -16,8 +16,9 @@ export default function SavedWorksList({
   const [items, setItems] = useState<DrawingRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { register } = useSavedWorksRefresh();
 
-  const loadItems = async () => {
+  const loadItems = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -31,7 +32,7 @@ export default function SavedWorksList({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -40,23 +41,22 @@ export default function SavedWorksList({
     return () => {
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [loadItems]);
+
+  useEffect(() => {
+    const run = () => {
+      void loadItems();
+    };
+    register(run);
+    return () => {
+      register(null);
+    };
+  }, [loadItems, register]);
 
   return (
     <section className="mx-auto w-full max-w-[1200px] px-4 py-8">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4">
         <h2 className="text-lg font-semibold text-zinc-900">Сохраненные работы</h2>
-        <button
-          type="button"
-          onClick={() => {
-            void loadItems();
-          }}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-black/25 bg-zinc-900 text-white transition hover:bg-zinc-800"
-          title="Обновить"
-          aria-label="Обновить список"
-        >
-          <RefreshCw className="h-4 w-4" strokeWidth={2} aria-hidden />
-        </button>
       </div>
 
       {isLoading ? <p className="text-sm text-zinc-600">Загрузка...</p> : null}

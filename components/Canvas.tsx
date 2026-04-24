@@ -20,12 +20,11 @@ import {
 import { removeStorageObjects, STORAGE_PATH_KEY } from "../utils/imageStorage";
 import { Loader2 } from "lucide-react";
 import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollaboration";
-import { APP_NAV_HEIGHT_PX } from "./AppNav";
-import Toolbar, {
-  TOOLBAR_HEIGHT_PX,
+import StudioConsole, {
+  STUDIO_CONSOLE_HEIGHT_PX,
   type TextSizeOption,
   type Tool,
-} from "./Toolbar";
+} from "./StudioConsole";
 
 type FabricWithEraser = typeof fabric & {
   EraserBrush?: new (canvas: fabric.Canvas) => fabric.BaseBrush;
@@ -794,11 +793,11 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     }
   };
 
-  const topChromePx = APP_NAV_HEIGHT_PX + TOOLBAR_HEIGHT_PX;
+  const topChromePx = STUDIO_CONSOLE_HEIGHT_PX;
 
   return (
-    <section className="relative h-screen overflow-hidden bg-zinc-100">
-      <Toolbar
+    <section className="relative h-screen overflow-hidden bg-gray-50">
+      <StudioConsole
         activeTool={activeTool}
         pencilColor={pencilColor}
         isImageDeleteMode={isImageDeleteMode}
@@ -861,7 +860,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         <div className="mx-auto flex w-full max-w-[1200px] justify-center px-3 pb-8 pt-4">
           <div
             ref={boardContainerRef}
-            className="relative w-[min(92vw,980px)] overflow-hidden rounded-lg border border-zinc-300 bg-white shadow"
+            className="relative w-[min(92vw,980px)] overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm"
             style={{ height: `${canvasHeight}px` }}
           >
             <canvas ref={imgCanvasElementRef} className="absolute inset-0 z-[1]" />

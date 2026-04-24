@@ -3,11 +3,8 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { DoorOpen, Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import {
-  deleteDrawingById,
-  type DrawingRow,
-  listDrawings,
-} from "../utils/drawingsApi";
+import { type DrawingRow, listDrawings } from "../utils/drawingsApi";
+import { supabase } from "../utils/supabaseClient";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
 
 export default function LibraryModal() {
@@ -66,11 +63,26 @@ export default function LibraryModal() {
     ) {
       return;
     }
-    setDeletingId(row.id);
+    const rowId = row.id;
+    if (typeof rowId !== "string" || !rowId.trim()) {
+      console.error("Ожидалась строка (UUID) в row.id, получено:", rowId);
+      window.alert("Некорректный идентификатор записи.");
+      return;
+    }
+    setDeletingId(rowId);
     try {
-      await deleteDrawingById(row.id);
-      setRows((list) => list.filter((r) => r.id !== row.id));
+      console.log("Удаляю ID:", rowId);
+      const { error } = await supabase.from("drawings").delete().eq("id", rowId);
+      if (error) {
+        console.log(error);
+        window.alert(
+          `Не удалось удалить работу: ${error.message ?? "неизвестная ошибка"}`,
+        );
+        return;
+      }
+      setRows((list) => list.filter((r) => r.id !== rowId));
     } catch (e) {
+      console.log(e);
       window.alert(
         e instanceof Error ? e.message : "Не удалось удалить работу",
       );
@@ -92,95 +104,97 @@ export default function LibraryModal() {
     >
       <button
         type="button"
-        className="absolute inset-0 cursor-default bg-zinc-900/50"
+        className="absolute inset-0 cursor-default bg-black/40 backdrop-blur-[2px]"
         onClick={close}
         tabIndex={-1}
-        aria-label="Закрыть"
+        aria-label="Закрыть (фон)"
       />
       <div
-        className="relative z-[1] flex max-h-[min(90vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border-2 border-black bg-white shadow-xl"
+        className="relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-2xl shadow-gray-200/50"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3 sm:px-5">
-          <div>
-            <h2 id={titleId} className="text-lg font-semibold tracking-tight text-zinc-900">
-              Библиотека работ
-            </h2>
-            <p className="text-sm text-zinc-500">Все сохранённые рисунки из базы</p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => void loadDrawings()}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-black/25 bg-white text-zinc-900 transition hover:bg-zinc-100"
-              title="Обновить"
-              aria-label="Обновить список"
-            >
-              <RefreshCw className="h-4 w-4" strokeWidth={2} aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={close}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-800 transition hover:bg-zinc-50"
-              title="Закрыть"
-              aria-label="Закрыть"
-            >
-              <X className="h-4 w-4" strokeWidth={2} aria-hidden />
-            </button>
-          </div>
+        <button
+          type="button"
+          onClick={close}
+          className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
+          title="Закрыть"
+          aria-label="Закрыть"
+        >
+          <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+        </button>
+        <div className="shrink-0 border-b border-gray-100 px-5 pb-4 pr-32 pt-5 sm:pr-40">
+          <h2
+            id={titleId}
+            className="text-[15px] font-semibold tracking-[-0.01em] text-gray-900"
+          >
+            Библиотека
+          </h2>
+          <p className="mt-0.5 text-sm text-gray-500">Сохранённые работы</p>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
+        <div className="absolute right-14 top-3 z-10">
+          <button
+            type="button"
+            onClick={() => void loadDrawings()}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
+            title="Обновить"
+            aria-label="Обновить список"
+          >
+            <RefreshCw className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
-            <p className="text-sm text-zinc-600">Загрузка…</p>
+            <p className="text-sm text-gray-500">Загрузка…</p>
           ) : error ? (
-            <p className="text-sm text-red-600">Ошибка: {error}</p>
+            <p className="text-sm text-red-600/90">Ошибка: {error}</p>
           ) : rows.length === 0 ? (
-            <p className="text-sm text-zinc-600">Пока нет работ в таблице drawings.</p>
+            <p className="text-sm text-gray-500">Пока нет работ.</p>
           ) : (
-            <ul className="grid gap-3 sm:grid-cols-2 sm:gap-4">
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {rows.map((row) => {
                 const busy = deletingId === row.id;
                 return (
                   <li
                     key={row.id}
-                    className="flex flex-col rounded-lg border border-zinc-200 bg-zinc-50/80 p-3 shadow-sm"
+                    className="group flex flex-col rounded-xl border border-gray-200/80 bg-white p-3.5 transition hover:border-gray-200 hover:shadow-sm"
+                    title={row.id}
                   >
-                    <div className="min-w-0 flex-1 pr-1">
-                      <h3 className="truncate font-medium text-zinc-900">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="line-clamp-2 text-sm font-medium leading-snug text-gray-900">
                         {row.name || "Без названия"}
                       </h3>
-                      <p className="mt-1 text-xs text-zinc-500">
+                      <p className="mt-1 text-xs text-gray-500">
                         {row.created_at
                           ? new Date(row.created_at).toLocaleString("ru-RU", {
                               dateStyle: "medium",
                               timeStyle: "short",
                             })
-                          : "Дата не указана"}
+                          : "—"}
                       </p>
                     </div>
-                    <div className="mt-3 flex items-center justify-end gap-1.5 border-t border-zinc-100 pt-2.5">
+                    <div className="mt-3 flex items-center justify-end gap-1.5">
                       <button
                         type="button"
                         onClick={() => openOnBoard(row.id)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-800 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
                         title="Открыть на холсте"
                         aria-label={`Открыть «${row.name}» на холсте`}
                         disabled={busy}
                       >
-                        <DoorOpen className="h-5 w-5" strokeWidth={2} aria-hidden />
+                        <DoorOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden />
                       </button>
                       <button
                         type="button"
                         onClick={() => void onDelete(row)}
                         disabled={busy}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-200 bg-white text-red-600 transition enabled:hover:border-red-400 enabled:hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition enabled:hover:text-red-500 enabled:hover:bg-red-50/80 disabled:cursor-not-allowed disabled:opacity-50"
                         title="Удалить"
                         aria-label={`Удалить «${row.name}»`}
                       >
                         {busy ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={1.75} aria-hidden />
                         ) : (
-                          <Trash2 className="h-5 w-5" strokeWidth={2} aria-hidden />
+                          <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden />
                         )}
                       </button>
                     </div>
