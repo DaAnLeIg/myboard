@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  CircleAlert,
   Download,
   Eraser,
   Image as ImageIcon,
@@ -536,6 +537,15 @@ export default function StudioConsole({
               · Комната заполнена (макс. {maxRoomParticipants})
             </span>
           ) : null}
+          <span className="text-zinc-300">·</span>
+          <Link
+            href="/privacy"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-900"
+            title="Политика конфиденциальности"
+            aria-label="Политика конфиденциальности"
+          >
+            <CircleAlert className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+          </Link>
         </div>
       </header>
 
