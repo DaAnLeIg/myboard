@@ -125,3 +125,10 @@ export async function updateDrawing(input: UpdateDrawingInput) {
 
   return data as DrawingRow;
 }
+
+export async function deleteDrawingById(id: string): Promise<void> {
+  const { error } = await supabase.from("drawings").delete().eq("id", id);
+  if (error) {
+    throw error;
+  }
+}

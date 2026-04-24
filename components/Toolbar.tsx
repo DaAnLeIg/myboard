@@ -1,179 +1,304 @@
 "use client";
 
 import type { ChangeEvent, RefObject } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import {
+  Download,
+  Eraser,
+  Image as ImageIcon,
+  Loader2,
+  Plus,
+  Save,
+  Trash2,
+} from "lucide-react";
+import { APP_NAV_HEIGHT_PX } from "./AppNav";
 
-export const TOOLBAR_HEIGHT_PX = 72;
+export const TOOLBAR_HEIGHT_PX = 100;
 
 export type Tool = "pencil" | "eraser" | "text";
 
+export const PENCIL_SWATCHES = [
+  { key: "black", color: "#000000" },
+  { key: "white", color: "#ffffff" },
+  { key: "yellow", color: "#facc15" },
+  { key: "red", color: "#ef4444" },
+  { key: "blue", color: "#2563eb" },
+  { key: "green", color: "#16a34a" },
+] as const;
+
+export type TextSizeOption = 10 | 14 | 18;
+
 type ToolbarProps = {
   activeTool: Tool;
+  pencilColor: string;
   isImageDeleteMode: boolean;
-  isImageActionsOpen: boolean;
   isSavingToDrawings: boolean;
+  textFontSize: TextSizeOption;
   collabRoomId: string;
   collabParticipants: number;
   roomFull: boolean;
   maxRoomParticipants: number;
   fileInputRef: RefObject<HTMLInputElement | null>;
-  onPencil: () => void;
+  onPaletteColor: (hex: string) => void;
   onEraser: () => void;
-  onText: () => void;
-  onOpenImageMenu: () => void;
+  onTextSize: (px: TextSizeOption) => void;
+  onAddText: () => void;
   onAddImage: () => void;
   onToggleImageDelete: () => void;
-  onSave: () => void;
+  onSaveToDatabase: (name: string) => void | Promise<void>;
+  defaultWorkName: string;
   onExportPng: () => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
 };
 
+const frame = "inline-flex items-center gap-1.5 border border-black bg-white p-1.5";
+
 export default function Toolbar({
   activeTool,
+  pencilColor,
   isImageDeleteMode,
-  isImageActionsOpen,
   isSavingToDrawings,
+  textFontSize,
   collabRoomId,
   collabParticipants,
   roomFull,
   maxRoomParticipants,
   fileInputRef,
-  onPencil,
+  onPaletteColor,
   onEraser,
-  onText,
-  onOpenImageMenu,
+  onTextSize,
+  onAddText,
   onAddImage,
   onToggleImageDelete,
-  onSave,
+  onSaveToDatabase,
+  defaultWorkName,
   onExportPng,
   onFileChange,
 }: ToolbarProps) {
+  const isPencilActive = activeTool === "pencil" && !isImageDeleteMode;
+  const isEraserActive = activeTool === "eraser" && !isImageDeleteMode;
+  const [saveNameOpen, setSaveNameOpen] = useState(false);
+  const [workName, setWorkName] = useState(defaultWorkName);
+  const popoverId = useId();
+  const saveGroupRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setWorkName((prev) => (saveNameOpen ? prev : defaultWorkName));
+  }, [defaultWorkName, saveNameOpen]);
+
+  useEffect(() => {
+    if (!saveNameOpen) {
+      return;
+    }
+    const onDown = (e: MouseEvent) => {
+      const t = e.target;
+      if (
+        t instanceof Node &&
+        saveGroupRef.current &&
+        !saveGroupRef.current.contains(t)
+      ) {
+        setSaveNameOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [saveNameOpen]);
+
+  const handleMainSaveClick = () => {
+    if (isSavingToDrawings) {
+      return;
+    }
+    setWorkName((w) => (w.trim() ? w : defaultWorkName));
+    setSaveNameOpen(true);
+  };
+
+  const handleConfirmSave = () => {
+    const name = workName.trim() || defaultWorkName;
+    setSaveNameOpen(false);
+    void Promise.resolve(onSaveToDatabase(name));
+  };
+
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-center gap-2 px-3 py-3">
-          <button
-            type="button"
-            onClick={onPencil}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-              activeTool === "pencil" && !isImageDeleteMode
-                ? "bg-blue-600 text-white"
-                : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
-            }`}
-            title="Карандаш"
-            aria-label="Карандаш"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 20h9" />
-              <path d="m16.5 3.5 4 4L7 21l-4 1 1-4Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={onEraser}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-              activeTool === "eraser" && !isImageDeleteMode
-                ? "bg-blue-600 text-white"
-                : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
-            }`}
-            title="Ластик"
-            aria-label="Ластик"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m7 21 10.5-10.5a2.1 2.1 0 0 0 0-3L13.5 3a2.1 2.1 0 0 0-3 0L2 11.5a2.1 2.1 0 0 0 0 3L8.5 21" />
-              <path d="M22 21H8.5" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={onText}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-              activeTool === "text" && !isImageDeleteMode
-                ? "bg-blue-600 text-white"
-                : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
-            }`}
-            title="Текст"
-            aria-label="Текст"
-          >
-            <span className="text-lg font-black leading-none">T</span>
-          </button>
-          {!isImageActionsOpen ? (
+      <header
+        className="fixed inset-x-0 z-50 border-b border-zinc-200 bg-white/95 backdrop-blur"
+        style={{ top: APP_NAV_HEIGHT_PX }}
+      >
+        <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-center gap-2.5 overflow-visible px-3 py-2.5">
+          <div className={frame}>
+            <div className="grid w-[4.5rem] grid-cols-3 grid-rows-2 gap-0.5" role="group" aria-label="Цвет карандаша">
+              {PENCIL_SWATCHES.map((sw) => {
+                const selected = isPencilActive && pencilColor === sw.color;
+                return (
+                  <button
+                    key={sw.key}
+                    type="button"
+                    onClick={() => onPaletteColor(sw.color)}
+                    className={`h-4 w-4 border border-black/40 transition ${
+                      selected ? "ring-2 ring-offset-1 ring-black" : "hover:opacity-90"
+                    }`}
+                    style={{ backgroundColor: sw.color }}
+                    title={`Карандаш: ${sw.key}`}
+                    aria-label={`Карандаш, цвет ${sw.key}`}
+                    aria-pressed={selected}
+                  />
+                );
+              })}
+            </div>
             <button
               type="button"
-              onClick={onOpenImageMenu}
-              className="w-28 rounded-md bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-zinc-300"
-              title="Изображение"
-              aria-label="Изображение"
+              onClick={onEraser}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center border border-black/20 transition ${
+                isEraserActive ? "bg-black text-white" : "bg-white text-black hover:bg-zinc-100"
+              }`}
+              title="Ластик"
+              aria-label="Ластик"
             >
-              <svg
-                viewBox="0 0 24 24"
-                className="mx-auto h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="3" y="4" width="18" height="16" rx="2" />
-                <circle cx="9" cy="9" r="1.5" />
-                <path d="m21 16-5-5L5 20" />
-              </svg>
+              <Eraser className="h-4 w-4" strokeWidth={2} aria-hidden />
             </button>
-          ) : (
-            <div className="grid w-28 grid-cols-2 gap-1">
+          </div>
+
+          <div className={frame}>
+            <div className="grid grid-cols-2 grid-rows-2 gap-0.5" role="group" aria-label="Размер текста и новый абзац">
               <button
                 type="button"
-                onClick={onAddImage}
-                className="rounded-md bg-zinc-200 px-2 py-2 text-sm font-bold text-zinc-900 transition hover:bg-zinc-300"
-                title="Добавить изображение"
+                onClick={() => onTextSize(10)}
+                className={`flex h-8 w-8 items-end justify-center border border-black/30 font-serif font-bold leading-none text-black ${
+                  textFontSize === 10 ? "ring-1 ring-black" : "bg-white"
+                }`}
+                title="Размер текста 10 px"
+                aria-pressed={textFontSize === 10}
+                aria-label="Весь текст 10 px"
               >
-                +
+                <span className="text-[10px]">T</span>
               </button>
               <button
                 type="button"
-                onClick={onToggleImageDelete}
-                className={`rounded-md px-2 py-2 text-sm font-bold transition ${
-                  isImageDeleteMode
-                    ? "bg-red-600 text-white"
-                    : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
+                onClick={() => onTextSize(14)}
+                className={`flex h-8 w-8 items-end justify-center border border-black/30 font-serif font-bold leading-none text-black ${
+                  textFontSize === 14 ? "ring-1 ring-black" : "bg-white"
                 }`}
-                title="Удалить изображение"
+                title="Размер текста 14 px"
+                aria-pressed={textFontSize === 14}
+                aria-label="Весь текст 14 px"
               >
-                🗑️
+                <span className="text-[14px]">T</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onTextSize(18)}
+                className={`flex h-8 w-8 items-end justify-center border border-black/30 font-serif font-bold leading-none text-black ${
+                  textFontSize === 18 ? "ring-1 ring-black" : "bg-white"
+                }`}
+                title="Размер текста 18 px"
+                aria-pressed={textFontSize === 18}
+                aria-label="Весь текст 18 px"
+              >
+                <span className="text-lg">T</span>
+              </button>
+              <button
+                type="button"
+                onClick={onAddText}
+                className="flex h-8 w-8 items-center justify-center border border-dashed border-black bg-zinc-50 text-black transition hover:bg-zinc-100"
+                title="Новый абзац"
+                aria-label="Вставить новый текст"
+              >
+                <Plus className="h-4 w-4" strokeWidth={2.25} aria-hidden />
               </button>
             </div>
-          )}
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={isSavingToDrawings}
-            className="rounded-md bg-zinc-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-            title="Сохранить"
-          >
-            {isSavingToDrawings ? "Сохранение..." : "Сохранить"}
-          </button>
+          </div>
+
+          <div className={frame}>
+            <button
+              type="button"
+              onClick={onAddImage}
+              className="flex h-9 w-9 items-center justify-center bg-white text-black"
+              title="Вставить изображение"
+              aria-label="Вставить изображение"
+            >
+              <ImageIcon className="h-5 w-5" strokeWidth={2} aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={onToggleImageDelete}
+              className={`flex h-9 w-9 items-center justify-center ${
+                isImageDeleteMode ? "bg-red-600 text-white" : "bg-white text-black"
+              }`}
+              title="Удалить изображение"
+              aria-pressed={isImageDeleteMode}
+              aria-label="Режим удаления изображений"
+            >
+              <Trash2 className="h-5 w-5" strokeWidth={2} aria-hidden />
+            </button>
+          </div>
+
+          <div className="relative" ref={saveGroupRef}>
+            <button
+              type="button"
+              onClick={handleMainSaveClick}
+              disabled={isSavingToDrawings}
+              className="inline-flex h-9 min-w-9 items-center justify-center border border-black bg-white px-2.5 text-black transition enabled:hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Сохранить в базу"
+              aria-expanded={saveNameOpen}
+              aria-controls={saveNameOpen ? popoverId : undefined}
+              aria-label="Сохранить в базу: задать название"
+            >
+              {isSavingToDrawings ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+              ) : (
+                <Save className="h-4 w-4" strokeWidth={2} aria-hidden />
+              )}
+            </button>
+            {saveNameOpen && !isSavingToDrawings ? (
+              <div
+                id={popoverId}
+                className="absolute right-0 top-full z-[80] mt-1.5 w-[min(18rem,92vw)] rounded-md border border-black bg-white p-2 shadow-lg"
+                role="region"
+                aria-label="Название работы"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleConfirmSave();
+                  }
+                }}
+              >
+                <label className="block text-xs font-medium text-zinc-700" htmlFor={`${popoverId}-input`}>
+                  Название работы
+                </label>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <input
+                    id={`${popoverId}-input`}
+                    className="min-w-0 flex-1 border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
+                    value={workName}
+                    onChange={(e) => setWorkName(e.target.value)}
+                    placeholder={defaultWorkName}
+                    maxLength={120}
+                    autoFocus
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleConfirmSave}
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center border border-black bg-zinc-900 text-white transition hover:bg-zinc-800"
+                    title="Сохранить"
+                    aria-label="Подтвердить сохранение"
+                  >
+                    <Save className="h-4 w-4" strokeWidth={2} aria-hidden />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
           <button
             type="button"
             onClick={onExportPng}
-            className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500"
-            title="Экспорт в PNG"
+            className="inline-flex h-9 items-center gap-1 border border-black bg-white px-2.5 text-sm font-medium text-black transition hover:bg-zinc-100"
+            title="Скачать PNG"
+            aria-label="Скачать PNG"
           >
-            Экспорт в PNG
+            <Download className="h-4 w-4" strokeWidth={2} aria-hidden />
+            <span>PNG</span>
           </button>
         </div>
         <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-center gap-2 border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-600">

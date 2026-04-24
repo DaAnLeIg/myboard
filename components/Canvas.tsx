@@ -18,15 +18,22 @@ import {
   SNAPSHOT_IMAGE_PROPS,
 } from "../utils/canvasLogic";
 import { removeStorageObjects, STORAGE_PATH_KEY } from "../utils/imageStorage";
+import { Loader2 } from "lucide-react";
 import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollaboration";
-import Toolbar, { TOOLBAR_HEIGHT_PX, type Tool } from "./Toolbar";
+import { APP_NAV_HEIGHT_PX } from "./AppNav";
+import Toolbar, {
+  TOOLBAR_HEIGHT_PX,
+  type TextSizeOption,
+  type Tool,
+} from "./Toolbar";
 
 type FabricWithEraser = typeof fabric & {
   EraserBrush?: new (canvas: fabric.Canvas) => fabric.BaseBrush;
 };
 
-const TEXT_FONT_SIZE = 14;
 const TEXT_HORIZONTAL_PADDING = 14;
+const DEFAULT_PENCIL_COLOR = "#000000";
+const DEFAULT_TEXT_SIZE: TextSizeOption = 14;
 const DOCUMENT_BOTTOM_PADDING = 24;
 const SUPABASE_CANVAS_TABLE = "canvas_documents";
 const SUPABASE_DOCUMENT_ID = "default";
@@ -54,15 +61,19 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeToolRef = useRef<Tool>("pencil");
   const isImageDeleteModeRef = useRef(false);
+  const pencilColorRef = useRef<string>(DEFAULT_PENCIL_COLOR);
+  const textFontSizeRef = useRef<TextSizeOption>(DEFAULT_TEXT_SIZE);
   const pendingImageStorageDeletesRef = useRef<Set<string>>(new Set());
   const imageCloudSyncDepthRef = useRef(0);
   const [activeTool, setActiveTool] = useState<Tool>("pencil");
-  const [isImageActionsOpen, setIsImageActionsOpen] = useState(false);
+  const [pencilColor, setPencilColor] = useState<string>(DEFAULT_PENCIL_COLOR);
+  const [textFontSize, setTextFontSize] = useState<TextSizeOption>(DEFAULT_TEXT_SIZE);
   const [isImageDeleteMode, setIsImageDeleteMode] = useState(false);
   const [canvasHeight, setCanvasHeight] = useState(600);
   const [isSavingToDrawings, setIsSavingToDrawings] = useState(false);
   const [isImageCloudSyncing, setIsImageCloudSyncing] = useState(false);
   const [canvasesReady, setCanvasesReady] = useState(false);
+  const [defaultWorkName, setDefaultWorkName] = useState("MyBoard");
 
   const { roomId: collabRoomId, roomFull, cursors, participants: collabParticipants } =
     useRoomCollaboration({
@@ -115,15 +126,17 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   };
 
   const setTextEditingVisuals = (text: fabric.IText) => {
+    const fill = (typeof text.fill === "string" && text.fill ? text.fill : "#000000") as string;
+    const fs = typeof text.fontSize === "number" ? text.fontSize : textFontSizeRef.current;
     text.set({
       fontFamily: "Arial",
-      fontSize: TEXT_FONT_SIZE,
-      fill: "#000000",
+      fontSize: fs,
+      fill,
       backgroundColor: "rgba(255,255,255,0.25)",
       padding: TEXT_HORIZONTAL_PADDING,
       borderColor: "rgba(255, 80, 80, 0.35)",
       editingBorderColor: "rgba(255, 80, 80, 0.55)",
-      cursorColor: "#000000",
+      cursorColor: fill,
       selectionColor: "rgba(255, 80, 80, 0.15)",
       shadow: new fabric.Shadow({
         color: "rgba(255,255,255,0.8)",
@@ -135,16 +148,41 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   };
 
   const setTextIdleVisuals = (text: fabric.IText) => {
+    const fill = (typeof text.fill === "string" && text.fill ? text.fill : "#000000") as string;
+    const fs = typeof text.fontSize === "number" ? text.fontSize : textFontSizeRef.current;
     text.set({
       fontFamily: "Arial",
-      fontSize: TEXT_FONT_SIZE,
-      fill: "#000000",
+      fontSize: fs,
+      fill,
       backgroundColor: "rgba(255,255,255,0.25)",
       padding: TEXT_HORIZONTAL_PADDING,
       borderColor: "rgba(0,0,0,0)",
       editingBorderColor: "rgba(0,0,0,0)",
       shadow: null,
     });
+  };
+
+  const applyTextFontSizeToAll = (px: TextSizeOption) => {
+    const textCanvas = textCanvasRef.current;
+    if (!textCanvas) {
+      return;
+    }
+    setTextFontSize(px);
+    textFontSizeRef.current = px;
+    for (const obj of textCanvas.getObjects()) {
+      if (!(obj instanceof fabric.IText)) {
+        continue;
+      }
+      obj.set("fontSize", px);
+      if (obj.isEditing) {
+        setTextEditingVisuals(obj);
+      } else {
+        setTextIdleVisuals(obj);
+      }
+    }
+    textCanvas.requestRenderAll();
+    recalcDocumentHeightRef.current?.();
+    requestSaveRef.current?.();
   };
 
   const clearTextEditingVisuals = () => {
@@ -394,8 +432,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       if (!event.path) {
         return;
       }
-      event.path.globalCompositeOperation =
-        activeToolRef.current === "eraser" ? "destination-out" : "source-over";
+      if (activeToolRef.current === "pencil") {
+        event.path.set({ stroke: pencilColorRef.current });
+        event.path.globalCompositeOperation = "source-over";
+      } else {
+        event.path.globalCompositeOperation = "destination-out";
+      }
       drawCanvas.renderAll();
       scheduleRecalc();
       queueSaveDocument();
@@ -554,6 +596,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
   useEffect(() => {
     activeToolRef.current = activeTool;
+    pencilColorRef.current = pencilColor;
     const drawCanvas = drawCanvasRef.current;
     const textCanvas = textCanvasRef.current;
     if (!drawCanvas || !textCanvas) {
@@ -573,16 +616,19 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     } else {
       const brush = new fabric.PencilBrush(drawCanvas);
       brush.width = 4;
-      brush.color = "#000000";
+      brush.color = pencilColor;
       drawCanvas.freeDrawingBrush = brush;
     }
     drawCanvas.isDrawingMode =
       !isImageDeleteMode && (activeTool === "pencil" || activeTool === "eraser");
     textCanvas.defaultCursor = activeTool === "text" ? "text" : "default";
-  }, [activeTool, isImageDeleteMode]);
+  }, [activeTool, isImageDeleteMode, pencilColor]);
+
+  useEffect(() => {
+    textFontSizeRef.current = textFontSize;
+  }, [textFontSize]);
 
   const addText = () => {
-    setIsImageActionsOpen(false);
     setIsImageDeleteMode(false);
     isImageDeleteModeRef.current = false;
     activeToolRef.current = "text";
@@ -597,6 +643,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       drawCanvas.isDrawingMode = false;
       textCanvas.defaultCursor = "text";
 
+      const size = textFontSizeRef.current;
       const existingText = lastTextObjectRef.current;
       const hasExistingText =
         existingText && textCanvas.getObjects().includes(existingText);
@@ -612,7 +659,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         left: baseLeft,
         top: nextTop,
         fontFamily: "Arial",
-        fontSize: TEXT_FONT_SIZE,
+        fontSize: size,
         fill: "#000000",
         editable: true,
         backgroundColor: "rgba(255,255,255,0.25)",
@@ -655,7 +702,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     fileInputRef.current?.click();
   };
 
-  const saveToSupabase = async () => {
+  const saveToSupabase = async (name: string) => {
     const imgCanvas = imgCanvasRef.current;
     const textCanvas = textCanvasRef.current;
     const drawCanvas = drawCanvasRef.current;
@@ -663,14 +710,16 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return;
     }
 
+    const trimmed = name.trim() || "MyBoard";
     setIsSavingToDrawings(true);
     try {
       const content = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
       await createDrawing({
-        name: "MyBoard",
+        name: trimmed,
         content,
         roomId: "room-1",
       });
+      setDefaultWorkName(trimmed);
       const toRemove = [...pendingImageStorageDeletesRef.current];
       pendingImageStorageDeletesRef.current.clear();
       if (toRemove.length > 0) {
@@ -745,39 +794,42 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     }
   };
 
+  const topChromePx = APP_NAV_HEIGHT_PX + TOOLBAR_HEIGHT_PX;
+
   return (
     <section className="relative h-screen overflow-hidden bg-zinc-100">
       <Toolbar
         activeTool={activeTool}
+        pencilColor={pencilColor}
         isImageDeleteMode={isImageDeleteMode}
-        isImageActionsOpen={isImageActionsOpen}
         isSavingToDrawings={isSavingToDrawings}
+        textFontSize={textFontSize}
         collabRoomId={collabRoomId}
         collabParticipants={collabParticipants}
         roomFull={roomFull}
         maxRoomParticipants={MAX_ROOM_PARTICIPANTS}
         fileInputRef={fileInputRef}
-        onPencil={() => {
+        onPaletteColor={(hex) => {
           clearTextEditingVisuals();
-          setIsImageActionsOpen(false);
-          setIsImageDeleteMode(false);
+          setPencilColor(hex);
+          pencilColorRef.current = hex;
           isImageDeleteModeRef.current = false;
+          setIsImageDeleteMode(false);
           activeToolRef.current = "pencil";
           setActiveTool("pencil");
         }}
         onEraser={() => {
           clearTextEditingVisuals();
-          setIsImageActionsOpen(false);
-          setIsImageDeleteMode(false);
           isImageDeleteModeRef.current = false;
+          setIsImageDeleteMode(false);
           activeToolRef.current = "eraser";
           setActiveTool("eraser");
         }}
-        onText={addText}
-        onOpenImageMenu={() => {
+        onTextSize={(px) => {
           clearTextEditingVisuals();
-          setIsImageActionsOpen(true);
+          applyTextFontSizeToAll(px);
         }}
+        onAddText={addText}
         onAddImage={() => {
           clearTextEditingVisuals();
           openFileDialog();
@@ -790,9 +842,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
             return next;
           });
         }}
-        onSave={() => {
+        defaultWorkName={defaultWorkName}
+        onSaveToDatabase={(name) => {
           clearTextEditingVisuals();
-          void saveToSupabase();
+          return saveToSupabase(name);
         }}
         onExportPng={() => {
           clearTextEditingVisuals();
@@ -803,7 +856,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
       <div
         className="h-full overflow-y-auto"
-        style={{ paddingTop: `${TOOLBAR_HEIGHT_PX}px` }}
+        style={{ paddingTop: `${topChromePx}px` }}
       >
         <div className="mx-auto flex w-full max-w-[1200px] justify-center px-3 pb-8 pt-4">
           <div
@@ -855,8 +908,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           aria-busy="true"
         >
           <div className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 bg-white px-6 py-5 shadow-lg">
-            <div
-              className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-blue-600"
+            <Loader2
+              className="h-10 w-10 animate-spin text-blue-600"
+              strokeWidth={2}
               aria-hidden
             />
             <p className="text-sm font-medium text-zinc-800">Загрузка в облако…</p>

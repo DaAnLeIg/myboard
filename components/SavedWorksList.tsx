@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { listDrawings, type DrawingRow } from "../utils/drawingsApi";
 
 type SavedWorksListProps = {
@@ -50,9 +51,11 @@ export default function SavedWorksList({
           onClick={() => {
             void loadItems();
           }}
-          className="rounded-md bg-zinc-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-zinc-700"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-black/25 bg-zinc-900 text-white transition hover:bg-zinc-800"
+          title="Обновить"
+          aria-label="Обновить список"
         >
-          Обновить
+          <RefreshCw className="h-4 w-4" strokeWidth={2} aria-hidden />
         </button>
       </div>
 
