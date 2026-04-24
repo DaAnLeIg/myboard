@@ -58,12 +58,32 @@ export async function createDrawing(input: CreateDrawingInput) {
 
 export async function listDrawings(limit = 30) {
   const ownerToken = getOrCreateOwnerToken();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("drawings")
     .select("id, created_at, name, content, preview_url, room_id")
     .eq("owner_token", ownerToken)
     .order("created_at", { ascending: false })
     .limit(limit);
+
+  const errCode =
+    error && typeof error === "object" && "code" in error
+      ? (error as { code?: string }).code
+      : undefined;
+  const errMessage = error?.message ?? "";
+  const shouldFallbackToLegacyQuery =
+    errCode === "42703" || /owner_token/i.test(errMessage);
+
+  // Backward compatibility: in databases where owner_token migration
+  // has not been applied yet, fall back to a legacy read query.
+  if (shouldFallbackToLegacyQuery) {
+    const fallback = await supabase
+      .from("drawings")
+      .select("id, created_at, name, content, preview_url, room_id")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    data = fallback.data;
+    error = fallback.error;
+  }
 
   if (error) {
     throw error;

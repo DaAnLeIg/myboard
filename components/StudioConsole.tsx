@@ -5,12 +5,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ChevronDown,
   CircleAlert,
-  DoorOpen,
   Download,
   Eraser,
+  FolderOpen,
   Image as ImageIcon,
-  Library,
   Loader2,
   Menu,
   Pencil,
@@ -66,6 +66,8 @@ const toolButtonActive = "bg-gray-200";
 
 export type BoardChrome = "light" | "dark" | "ivory";
 
+export type BoardExportFormat = "png" | "jpeg" | "pdf";
+
 type StudioConsoleProps = {
   activeTool: Tool;
   pencilColor: string;
@@ -99,7 +101,7 @@ type StudioConsoleProps = {
   onToggleImageDelete: () => void;
   onSaveToDatabase: (name: string) => void | Promise<void>;
   defaultWorkName: string;
-  onExportPng: () => void;
+  onExportBoard: (format: BoardExportFormat) => void | Promise<void>;
   onShareBoard?: () => Promise<boolean>;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onNewDocument?: () => void | Promise<void>;
@@ -136,7 +138,7 @@ export default function StudioConsole({
   onToggleImageDelete,
   onSaveToDatabase,
   defaultWorkName,
-  onExportPng,
+  onExportBoard,
   onShareBoard,
   onFileChange,
   onNewDocument,
@@ -264,6 +266,9 @@ export default function StudioConsole({
   const [refreshErrorFlash, setRefreshErrorFlash] = useState(false);
   const [mobileRoomOpen, setMobileRoomOpen] = useState(false);
   const [desktopRoomOpen, setDesktopRoomOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportWrapRef = useRef<HTMLDivElement | null>(null);
+  const exportLeaveTimerRef = useRef<number | null>(null);
   const [mobileFabOpen, setMobileFabOpen] = useState(false);
   const [mobileFabPinned, setMobileFabPinned] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -361,13 +366,48 @@ export default function StudioConsole({
     setMobileFabOpen((prev) => !prev);
   };
 
+  const clearExportLeaveTimer = () => {
+    if (exportLeaveTimerRef.current != null) {
+      window.clearTimeout(exportLeaveTimerRef.current);
+      exportLeaveTimerRef.current = null;
+    }
+  };
+
+  const openExportMenu = () => {
+    clearExportLeaveTimer();
+    setExportMenuOpen(true);
+  };
+
+  const scheduleCloseExportMenu = () => {
+    clearExportLeaveTimer();
+    exportLeaveTimerRef.current = window.setTimeout(() => {
+      setExportMenuOpen(false);
+      exportLeaveTimerRef.current = null;
+    }, 240);
+  };
+
   useEffect(() => {
     return () => {
       clearFabLongPressTimer();
       clearPanelLongPressTimer();
       clearDragTimer();
+      clearExportLeaveTimer();
     };
   }, []);
+
+  useEffect(() => {
+    if (!exportMenuOpen || typeof document === "undefined") {
+      return;
+    }
+    const onDocPointer = (e: PointerEvent) => {
+      const el = exportWrapRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDocPointer, true);
+    return () => document.removeEventListener("pointerdown", onDocPointer, true);
+  }, [exportMenuOpen]);
 
   const handleShare = async () => {
     if (onShareBoard) {
@@ -578,7 +618,7 @@ export default function StudioConsole({
             title="Библиотека работ"
             aria-label="Библиотека работ"
           >
-            <Library className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+            <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
           <Popover open={mobileRoomOpen} onOpenChange={setMobileRoomOpen}>
             <PopoverTrigger asChild>
@@ -588,9 +628,8 @@ export default function StudioConsole({
                 title="Номер комнаты"
                 aria-label="Показать номер комнаты"
               >
-                <span className="relative inline-flex h-6 w-6 items-center justify-center" aria-hidden>
-                  <DoorOpen className="h-4 w-4" strokeWidth={ICON} />
-                  <span className="absolute bottom-0 right-0 text-[9px] font-black leading-none">N</span>
+                <span className="select-none text-[17px] font-black leading-none tracking-tight" aria-hidden>
+                  N
                 </span>
               </button>
             </PopoverTrigger>
@@ -773,7 +812,7 @@ export default function StudioConsole({
               aria-label="Библиотека работ"
               aria-pressed={isLibrary}
             >
-              <Library className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
             </button>
             <Popover open={desktopRoomOpen} onOpenChange={setDesktopRoomOpen}>
               <PopoverTrigger asChild>
@@ -783,9 +822,8 @@ export default function StudioConsole({
                   title="Номер комнаты"
                   aria-label="Показать номер комнаты"
                 >
-                  <span className="relative inline-flex h-6 w-6 items-center justify-center" aria-hidden>
-                    <DoorOpen className="h-4 w-4" strokeWidth={ICON} />
-                    <span className="absolute bottom-0 right-0 text-[9px] font-black leading-none">N</span>
+                  <span className="select-none text-[17px] font-black leading-none tracking-tight" aria-hidden>
+                    N
                   </span>
                 </button>
               </PopoverTrigger>
@@ -1028,16 +1066,69 @@ export default function StudioConsole({
               ) : null}
             </div>
 
-            <button
-              type="button"
-              onClick={onExportPng}
-              className="inline-flex h-8 min-h-8 shrink-0 items-center justify-center gap-0.5 rounded-md px-2 text-sm font-medium text-zinc-900 transition hover:bg-gray-100"
-              title="Скачать PNG"
-              aria-label="Скачать PNG"
+            <div
+              ref={exportWrapRef}
+              className="relative shrink-0"
+              onMouseEnter={openExportMenu}
+              onMouseLeave={scheduleCloseExportMenu}
             >
-              <Download className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
-              <span>PNG</span>
-            </button>
+              <button
+                type="button"
+                className="inline-flex h-8 min-h-8 w-full items-center justify-center gap-0.5 rounded-md px-2 text-sm font-medium text-zinc-900 transition hover:bg-gray-100"
+                title="Скачать документ (PNG, JPG или PDF)"
+                aria-label="Скачать документ"
+                aria-expanded={exportMenuOpen}
+                aria-haspopup="menu"
+                onClick={() => setExportMenuOpen((o) => !o)}
+              >
+                <Download className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+                <span>PNG</span>
+                <ChevronDown className="h-3 w-3 opacity-60" strokeWidth={ICON} aria-hidden />
+              </button>
+              {exportMenuOpen ? (
+                <div
+                  className="absolute right-0 top-full z-[95] mt-1 min-w-[9.5rem] rounded-md border border-zinc-200 bg-white py-1 shadow-lg"
+                  role="menu"
+                  aria-label="Формат файла"
+                  onMouseEnter={openExportMenu}
+                  onMouseLeave={scheduleCloseExportMenu}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
+                    onClick={() => {
+                      setExportMenuOpen(false);
+                      void Promise.resolve(onExportBoard("png"));
+                    }}
+                  >
+                    PNG
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
+                    onClick={() => {
+                      setExportMenuOpen(false);
+                      void Promise.resolve(onExportBoard("jpeg"));
+                    }}
+                  >
+                    JPG
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
+                    onClick={() => {
+                      setExportMenuOpen(false);
+                      void Promise.resolve(onExportBoard("pdf"));
+                    }}
+                  >
+                    PDF
+                  </button>
+                </div>
+              ) : null}
+            </div>
             </div>
           </div>
         </div>

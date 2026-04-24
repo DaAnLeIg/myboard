@@ -41,6 +41,7 @@ import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollabo
 import { cn } from "../utils/cn";
 import StudioConsole, {
   STUDIO_CONSOLE_HEIGHT_PX,
+  type BoardExportFormat,
   type TextSizeOption,
   type Tool,
 } from "./StudioConsole";
@@ -1554,12 +1555,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     }
   };
 
-  const exportToPng = () => {
+  const renderBoardToExportCanvas = (): HTMLCanvasElement | null => {
     const imgCanvas = imgCanvasRef.current;
     const textCanvas = textCanvasRef.current;
     const drawCanvas = drawCanvasRef.current;
     if (!imgCanvas || !textCanvas || !drawCanvas) {
-      return;
+      return null;
     }
 
     const width = drawCanvas.getWidth();
@@ -1570,7 +1571,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     const context = exportCanvas.getContext("2d");
     if (!context) {
-      return;
+      return null;
     }
 
     context.fillStyle = "#ffffff";
@@ -1578,36 +1579,79 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     context.drawImage(imgCanvas.lowerCanvasEl, 0, 0);
     context.drawImage(textCanvas.lowerCanvasEl, 0, 0);
     context.drawImage(drawCanvas.lowerCanvasEl, 0, 0);
-
-    const link = document.createElement("a");
-    link.href = exportCanvas.toDataURL("image/png");
-    link.download = `myboard-${Date.now()}.png`;
-    link.click();
+    return exportCanvas;
   };
 
+  const exportBoardDocument = useCallback(
+    async (format: BoardExportFormat) => {
+      const exportCanvas = renderBoardToExportCanvas();
+      if (!exportCanvas) {
+        return;
+      }
+
+      const ts = Date.now();
+      if (format === "png") {
+        const link = document.createElement("a");
+        link.href = exportCanvas.toDataURL("image/png");
+        link.download = `myboard-${ts}.png`;
+        link.click();
+        return;
+      }
+
+      if (format === "jpeg") {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            exportCanvas.toBlob(
+              (blob) => {
+                if (!blob) {
+                  reject(new Error("jpeg blob"));
+                  return;
+                }
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `myboard-${ts}.jpg`;
+                a.click();
+                URL.revokeObjectURL(url);
+                resolve();
+              },
+              "image/jpeg",
+              0.92,
+            );
+          });
+        } catch {
+          bumpNetworkError();
+        }
+        return;
+      }
+
+      if (format === "pdf") {
+        try {
+          const { jsPDF } = await import("jspdf");
+          const w = exportCanvas.width;
+          const h = exportCanvas.height;
+          const doc = new jsPDF(w > h ? "l" : "p", "px", [w, h]);
+          const imgData = exportCanvas.toDataURL("image/jpeg", 0.92);
+          doc.addImage(imgData, "JPEG", 0, 0, w, h);
+          doc.save(`myboard-${ts}.pdf`);
+        } catch (e) {
+          console.warn("export pdf:", e);
+          bumpNetworkError();
+        }
+      }
+    },
+    [bumpNetworkError],
+  );
+
   const shareBoardNative = async (): Promise<boolean> => {
-    const imgCanvas = imgCanvasRef.current;
-    const textCanvas = textCanvasRef.current;
-    const drawCanvas = drawCanvasRef.current;
-    if (!imgCanvas || !textCanvas || !drawCanvas || typeof navigator === "undefined") {
+    if (typeof navigator === "undefined") {
       return false;
     }
 
-    const width = drawCanvas.getWidth();
-    const height = drawCanvas.getHeight();
-    const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = width;
-    exportCanvas.height = height;
-
-    const context = exportCanvas.getContext("2d");
-    if (!context) {
+    const exportCanvas = renderBoardToExportCanvas();
+    if (!exportCanvas) {
       return false;
     }
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.drawImage(imgCanvas.lowerCanvasEl, 0, 0);
-    context.drawImage(textCanvas.lowerCanvasEl, 0, 0);
-    context.drawImage(drawCanvas.lowerCanvasEl, 0, 0);
 
     const blob = await new Promise<Blob | null>((resolve) =>
       exportCanvas.toBlob((b) => resolve(b), "image/png"),
@@ -1755,9 +1799,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           clearTextEditingVisuals();
           return saveToSupabase(name);
         }}
-        onExportPng={() => {
+        onExportBoard={async (format) => {
           clearTextEditingVisuals();
-          exportToPng();
+          await exportBoardDocument(format);
         }}
         onShareBoard={shareBoardNative}
         onFileChange={onFileSelected}
