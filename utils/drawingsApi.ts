@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { getOrCreateOwnerToken } from "./ownerToken";
 
 export type CanvasSnapshot = {
   imgLayer: unknown;
@@ -35,6 +36,7 @@ type UpdateDrawingInput = {
 };
 
 export async function createDrawing(input: CreateDrawingInput) {
+  const ownerToken = getOrCreateOwnerToken();
   const { data, error } = await supabase
     .from("drawings")
     .insert({
@@ -42,6 +44,7 @@ export async function createDrawing(input: CreateDrawingInput) {
       content: input.content,
       preview_url: input.previewUrl ?? null,
       room_id: input.roomId ?? null,
+      owner_token: ownerToken,
     })
     .select("id, created_at, name, content, preview_url, room_id")
     .single();
@@ -54,9 +57,11 @@ export async function createDrawing(input: CreateDrawingInput) {
 }
 
 export async function listDrawings(limit = 30) {
+  const ownerToken = getOrCreateOwnerToken();
   const { data, error } = await supabase
     .from("drawings")
     .select("id, created_at, name, content, preview_url, room_id")
+    .eq("owner_token", ownerToken)
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -68,10 +73,12 @@ export async function listDrawings(limit = 30) {
 }
 
 export async function getDrawingById(id: string) {
+  const ownerToken = getOrCreateOwnerToken();
   const { data, error } = await supabase
     .from("drawings")
     .select("id, created_at, name, content, preview_url, room_id")
     .eq("id", id)
+    .eq("owner_token", ownerToken)
     .single();
 
   if (error) {
@@ -82,10 +89,12 @@ export async function getDrawingById(id: string) {
 }
 
 export async function getLatestDrawingByRoom(roomId: string) {
+  const ownerToken = getOrCreateOwnerToken();
   const { data, error } = await supabase
     .from("drawings")
     .select("id, created_at, name, content, preview_url, room_id")
     .eq("room_id", roomId)
+    .eq("owner_token", ownerToken)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -98,6 +107,7 @@ export async function getLatestDrawingByRoom(roomId: string) {
 }
 
 export async function updateDrawing(input: UpdateDrawingInput) {
+  const ownerToken = getOrCreateOwnerToken();
   const patch: Record<string, unknown> = {};
   if (input.name !== undefined) {
     patch.name = input.name;
@@ -116,6 +126,7 @@ export async function updateDrawing(input: UpdateDrawingInput) {
     .from("drawings")
     .update(patch)
     .eq("id", input.id)
+    .eq("owner_token", ownerToken)
     .select("id, created_at, name, content, preview_url, room_id")
     .single();
 
@@ -124,4 +135,16 @@ export async function updateDrawing(input: UpdateDrawingInput) {
   }
 
   return data as DrawingRow;
+}
+
+export async function deleteDrawingById(id: string) {
+  const ownerToken = getOrCreateOwnerToken();
+  const { error } = await supabase
+    .from("drawings")
+    .delete()
+    .eq("id", id)
+    .eq("owner_token", ownerToken);
+  if (error) {
+    throw error;
+  }
 }

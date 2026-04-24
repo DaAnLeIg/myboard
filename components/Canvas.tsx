@@ -7,7 +7,10 @@ import { supabase } from "../utils/supabaseClient";
 import {
   type CanvasSnapshot,
   createDrawing,
+  deleteDrawingById,
   getDrawingById,
+  getLatestDrawingByRoom,
+  updateDrawing,
 } from "../utils/drawingsApi";
 import {
   assertImageJsonUsesRemoteSrcOnly,
@@ -18,12 +21,35 @@ import {
   SNAPSHOT_IMAGE_PROPS,
 } from "../utils/canvasLogic";
 import { removeStorageObjects, STORAGE_PATH_KEY } from "../utils/imageStorage";
+import {
+  getLocalCanvasSnapshot,
+  putLocalCanvasSnapshot,
+} from "../utils/localCanvasStore";
+import {
+  loadSnapshotFromDexie,
+  saveCanvasObjectsFromSnapshot,
+  syncDexieCanvasObjectsWithSupabase,
+} from "../utils/db";
+import {
+  db,
+  markCanvasObjectSynced,
+  replaceDrawingCanvasObjectsLocal,
+  upsertCanvasObjectLocal,
+  upsertProjectLocal,
+} from "../lib/db";
 import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollaboration";
+import { cn } from "../utils/cn";
 import StudioConsole, {
   STUDIO_CONSOLE_HEIGHT_PX,
   type TextSizeOption,
   type Tool,
 } from "./StudioConsole";
+
+/** Внешняя оболочка доски на десктопе — ~2/3 от прежних 1200px. */
+export const BOARD_OUTER_MAX_CLASS = "max-w-[800px]";
+/** Ширина рабочего поля: на sm+ ~2/3 от прежних 92vw / 980px. */
+export const BOARD_WIDTH_CLASS =
+  "relative w-[min(92vw,980px)] sm:w-[min(61.33vw,653px)] overflow-hidden rounded-md border shadow-sm";
 
 type FabricWithEraser = typeof fabric & {
   EraserBrush?: new (canvas: fabric.Canvas) => fabric.BaseBrush;
@@ -31,11 +57,20 @@ type FabricWithEraser = typeof fabric & {
 
 const TEXT_HORIZONTAL_PADDING = 14;
 const DEFAULT_PENCIL_COLOR = "#000000";
+const DEFAULT_PENCIL_WIDTH = 3 as const;
 const DEFAULT_TEXT_SIZE: TextSizeOption = 14;
 const DOCUMENT_BOTTOM_PADDING = 24;
 const SUPABASE_CANVAS_TABLE = "canvas_documents";
 const SUPABASE_DOCUMENT_ID = "default";
 const SAVE_DEBOUNCE_MS = 800;
+const OFFLINE_AUTOSAVE_MS = 30_000;
+const OBJECT_UPDATED_AT_KEY = "mbUpdatedAt";
+const AUTOSAVE_DRAFT_MS = 30_000;
+const PREVIEW_SNAPSHOT_MS = 5 * 60_000;
+const DRAFT_GRACE_MS = 5 * 60_000;
+const DRAFT_ROOM_STORAGE_KEY = "myboard_draft_room";
+const DRAFT_EXPIRES_AT_KEY = "myboard_draft_expires_at";
+const DRAFT_ROW_ID_KEY = "myboard_draft_row_id";
 
 type CanvasProps = {
   selectedDrawingId?: string | null;
@@ -63,8 +98,16 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const textFontSizeRef = useRef<TextSizeOption>(DEFAULT_TEXT_SIZE);
   const pendingImageStorageDeletesRef = useRef<Set<string>>(new Set());
   const networkOpDepthRef = useRef(0);
+  const draftSaveInFlightRef = useRef(false);
+  const previewSaveInFlightRef = useRef(false);
+  const draftRowIdRef = useRef<string | null>(null);
+  const draftRoomIdRef = useRef<string | null>(null);
+  const lastDraftSavedAtRef = useRef(0);
+  const lastPreviewSavedAtRef = useRef(0);
+  const didManualSaveRef = useRef(false);
   const [activeTool, setActiveTool] = useState<Tool>("pencil");
   const [pencilColor, setPencilColor] = useState<string>(DEFAULT_PENCIL_COLOR);
+  const [pencilWidth, setPencilWidth] = useState<1 | 3 | 5>(DEFAULT_PENCIL_WIDTH);
   const [textFontSize, setTextFontSize] = useState<TextSizeOption>(DEFAULT_TEXT_SIZE);
   const [isImageDeleteMode, setIsImageDeleteMode] = useState(false);
   const [canvasHeight, setCanvasHeight] = useState(600);
@@ -73,6 +116,14 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const [networkErrorTick, setNetworkErrorTick] = useState(0);
   const [canvasesReady, setCanvasesReady] = useState(false);
   const [defaultWorkName, setDefaultWorkName] = useState("MyBoard");
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [appearance, setAppearance] = useState<{ inverted: boolean; comfort: boolean }>({
+    inverted: false,
+    comfort: false,
+  });
+  const undoStackRef = useRef<CanvasSnapshot[]>([]);
+  const suppressHistoryUntilRef = useRef(0);
 
   const { roomId: collabRoomId, roomFull, cursors, participants: collabParticipants } =
     useRoomCollaboration({
@@ -85,25 +136,46 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       boardContainerRef,
     });
 
+  useEffect(() => {
+    const check = () => setIsMobileViewport(window.matchMedia("(max-width: 639px)").matches);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const existing = localStorage.getItem(DRAFT_ROOM_STORAGE_KEY);
+    if (existing && existing.trim()) {
+      draftRoomIdRef.current = existing;
+      return;
+    }
+    const created = `draft:${crypto.randomUUID()}`;
+    draftRoomIdRef.current = created;
+    localStorage.setItem(DRAFT_ROOM_STORAGE_KEY, created);
+  }, []);
+
   const bumpNetworkError = useCallback(() => {
     setNetworkErrorTick((n) => n + 1);
   }, []);
 
-  const beginNetworkOp = () => {
+  const beginNetworkOp = useCallback(() => {
     networkOpDepthRef.current += 1;
     if (networkOpDepthRef.current === 1) {
       setIsProcessing(true);
     }
-  };
+  }, []);
 
-  const endNetworkOp = () => {
+  const endNetworkOp = useCallback(() => {
     networkOpDepthRef.current = Math.max(0, networkOpDepthRef.current - 1);
     if (networkOpDepthRef.current === 0) {
       setIsProcessing(false);
     }
-  };
+  }, []);
 
-  const buildDocumentSnapshot = async (
+  const buildDocumentSnapshot = useCallback(async (
     imgCanvas: fabric.Canvas,
     textCanvas: fabric.Canvas,
     drawCanvas: fabric.Canvas,
@@ -119,8 +191,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       assertImageJsonUsesRemoteSrcOnly(imgLayer);
       return {
         imgLayer,
-        textLayer: textCanvas.toObject(),
-        drawLayer: drawCanvas.toObject(),
+        textLayer: textCanvas.toObject([OBJECT_UPDATED_AT_KEY]),
+        drawLayer: drawCanvas.toObject([OBJECT_UPDATED_AT_KEY]),
         canvasWidth: width,
         canvasHeight: height,
         savedAt: new Date().toISOString(),
@@ -128,7 +200,326 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     } finally {
       endNetworkOp();
     }
+  }, [beginNetworkOp, endNetworkOp]);
+
+  const markObjectUpdatedAt = (obj: fabric.Object | null | undefined) => {
+    if (!obj) {
+      return;
+    }
+    obj.set(OBJECT_UPDATED_AT_KEY as keyof fabric.Object, Date.now() as never);
   };
+
+  const persistSnapshotLocally = useCallback(
+    async (
+      snapshot: CanvasSnapshot,
+      opts?: {
+        pendingSync: boolean;
+      },
+    ) => {
+      try {
+        await putLocalCanvasSnapshot(SUPABASE_DOCUMENT_ID, snapshot, opts?.pendingSync ?? false);
+      } catch (e) {
+        console.warn("IndexedDB persist failed:", e);
+      }
+    },
+    [],
+  );
+
+  const syncPendingLocalSnapshot = useCallback(async () => {
+    try {
+      const local = await getLocalCanvasSnapshot(SUPABASE_DOCUMENT_ID);
+      if (!local || !local.pendingSync) {
+        return;
+      }
+      const { data: remote, error: remoteError } = await supabase
+        .from(SUPABASE_CANVAS_TABLE)
+        .select("updated_at")
+        .eq("id", SUPABASE_DOCUMENT_ID)
+        .maybeSingle();
+      if (remoteError) {
+        throw remoteError;
+      }
+      const remoteUpdatedAt = remote?.updated_at
+        ? new Date(remote.updated_at as string).getTime()
+        : 0;
+      if (remoteUpdatedAt >= local.updatedAt) {
+        await putLocalCanvasSnapshot(SUPABASE_DOCUMENT_ID, local.snapshot, false);
+        return;
+      }
+      const { error } = await supabase.from(SUPABASE_CANVAS_TABLE).upsert(
+        {
+          id: SUPABASE_DOCUMENT_ID,
+          img_layer: local.snapshot.imgLayer,
+          text_layer: local.snapshot.textLayer,
+          draw_layer: local.snapshot.drawLayer,
+          canvas_height: local.snapshot.canvasHeight,
+          updated_at: new Date(local.snapshot.savedAt).toISOString(),
+        },
+        { onConflict: "id" },
+      );
+      if (error) {
+        throw error;
+      }
+      await putLocalCanvasSnapshot(SUPABASE_DOCUMENT_ID, local.snapshot, false);
+    } catch (e) {
+      console.warn("Local sync failed:", e);
+    }
+  }, []);
+
+  const persistToDexie = useCallback(async (snapshot: CanvasSnapshot) => {
+    try {
+      await saveCanvasObjectsFromSnapshot(snapshot);
+    } catch (e) {
+      console.warn("Dexie persist failed:", e);
+    }
+  }, []);
+
+  const persistFabricObject = useCallback(
+    async (layer: "img" | "text" | "draw", obj: fabric.Object | null | undefined) => {
+      if (!obj || isLoadingDrawingRef.current) {
+        return;
+      }
+      const getFn = (obj as fabric.Object & { get?: (k: string) => unknown }).get;
+      const setFn = (obj as fabric.Object & { set?: (k: string, v: unknown) => void }).set;
+      const currentId = typeof getFn === "function" ? (getFn.call(obj, "mbCollabId") as string | undefined) : undefined;
+      const objectId = (typeof currentId === "string" && currentId) || crypto.randomUUID();
+      if (typeof setFn === "function" && (!currentId || currentId !== objectId)) {
+        setFn.call(obj, "mbCollabId", objectId);
+      }
+      markObjectUpdatedAt(obj);
+
+      const serialized =
+        layer === "img"
+          ? (obj.toObject([
+              ...SNAPSHOT_IMAGE_PROPS,
+              OBJECT_UPDATED_AT_KEY,
+              "mbCollabId",
+            ]) as Record<string, unknown>)
+          : (obj.toObject([OBJECT_UPDATED_AT_KEY, "mbCollabId"]) as Record<string, unknown>);
+
+      const drawingIdFromUrl =
+        typeof window !== "undefined"
+          ? new URL(window.location.href).searchParams.get("id") ??
+            new URL(window.location.href).searchParams.get("drawing")
+          : null;
+      const drawingId = selectedDrawingId ?? drawingIdFromUrl ?? SUPABASE_DOCUMENT_ID;
+      const rowId = `${drawingId}:${objectId}`;
+      const updatedAt = new Date().toISOString();
+      const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
+
+      await upsertCanvasObjectLocal({
+        id: rowId,
+        drawing_id: drawingId,
+        object_id: objectId,
+        layer,
+        payload: serialized,
+        updated_at: updatedAt,
+        dirty: isOffline,
+        last_sync_tstamp: null,
+      });
+
+      if (isOffline) {
+        return;
+      }
+
+      const { error } = await supabase.from("canvas_objects").upsert(
+        {
+          id: rowId,
+          drawing_id: drawingId,
+          object_id: objectId,
+          layer,
+          payload: serialized,
+          updated_at: updatedAt,
+          last_updated_at: updatedAt,
+          last_sync_tstamp: updatedAt,
+        },
+        { onConflict: "id" },
+      );
+      if (!error) {
+        await markCanvasObjectSynced(rowId);
+      } else {
+        console.warn("canvas_objects upsert failed:", error);
+      }
+    },
+    [selectedDrawingId],
+  );
+
+  const syncOfflineChanges = useCallback(async () => {
+    try {
+      const rows = await db.canvas_objects.toArray();
+      const pending = rows.filter((row) => {
+        const localTs = new Date(row.updated_at).getTime();
+        const syncTs = row.last_sync_tstamp ? new Date(row.last_sync_tstamp).getTime() : 0;
+        return Number.isFinite(localTs) && localTs > syncTs;
+      });
+      if (pending.length === 0) {
+        return;
+      }
+
+      const payload = pending.map((row) => ({
+        id: row.id,
+        drawing_id: row.drawing_id,
+        object_id: row.object_id,
+        layer: row.layer,
+        payload: row.payload,
+        updated_at: row.updated_at,
+        last_updated_at: row.updated_at,
+        last_sync_tstamp: new Date().toISOString(),
+      }));
+
+      const { error } = await supabase.from("canvas_objects").upsert(payload, {
+        onConflict: "id",
+      });
+      if (error) {
+        throw error;
+      }
+
+      for (const row of pending) {
+        await markCanvasObjectSynced(row.id);
+      }
+    } catch (e) {
+      console.warn("syncOfflineChanges failed:", e);
+    }
+  }, []);
+
+  const ensureObjectUuid = (obj: fabric.Object | null | undefined) => {
+    if (!obj) {
+      return;
+    }
+    const getFn = (obj as fabric.Object & { get?: (k: string) => unknown }).get;
+    const setFn = (obj as fabric.Object & { set?: (k: string, v: unknown) => void }).set;
+    const current = typeof getFn === "function" ? (getFn.call(obj, "mbCollabId") as string | undefined) : undefined;
+    if (typeof current === "string" && current.length > 0) {
+      return;
+    }
+    if (typeof setFn === "function") {
+      setFn.call(obj, "mbCollabId", crypto.randomUUID());
+    }
+  };
+
+  const renderPreviewBlob = (
+    imgCanvas: fabric.Canvas,
+    textCanvas: fabric.Canvas,
+    drawCanvas: fabric.Canvas,
+  ): Promise<Blob> =>
+    new Promise((resolve, reject) => {
+      const width = drawCanvas.getWidth();
+      const height = drawCanvas.getHeight();
+      const exportCanvas = document.createElement("canvas");
+      exportCanvas.width = width;
+      exportCanvas.height = height;
+      const context = exportCanvas.getContext("2d");
+      if (!context) {
+        reject(new Error("Cannot create 2d context for preview"));
+        return;
+      }
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      context.drawImage(imgCanvas.lowerCanvasEl, 0, 0);
+      context.drawImage(textCanvas.lowerCanvasEl, 0, 0);
+      context.drawImage(drawCanvas.lowerCanvasEl, 0, 0);
+      exportCanvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("Failed to export preview blob"));
+          return;
+        }
+        resolve(blob);
+      }, "image/png");
+    });
+
+  const saveDraftSnapshot = useCallback(
+    async (opts?: { forcePreview?: boolean }) => {
+      const imgCanvas = imgCanvasRef.current;
+      const textCanvas = textCanvasRef.current;
+      const drawCanvas = drawCanvasRef.current;
+      const draftRoom = draftRoomIdRef.current;
+      if (!imgCanvas || !textCanvas || !drawCanvas || !draftRoom) {
+        return;
+      }
+      if (draftSaveInFlightRef.current) {
+        return;
+      }
+      draftSaveInFlightRef.current = true;
+      beginNetworkOp();
+      try {
+        const content = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
+        const now = Date.now();
+        const shouldUpdatePreview =
+          opts?.forcePreview === true ||
+          now - lastPreviewSavedAtRef.current >= PREVIEW_SNAPSHOT_MS;
+
+        let previewUrl: string | null | undefined;
+        if (shouldUpdatePreview && !previewSaveInFlightRef.current) {
+          previewSaveInFlightRef.current = true;
+          try {
+            const previewBlob = await renderPreviewBlob(imgCanvas, textCanvas, drawCanvas);
+            const path = `previews/draft-${draftRoom.replace(/[^a-zA-Z0-9:_-]/g, "")}.png`;
+            const { error: uploadError } = await supabase.storage
+              .from("images")
+              .upload(path, previewBlob, {
+                contentType: "image/png",
+                cacheControl: "60",
+                upsert: true,
+              });
+            if (!uploadError) {
+              const { data } = supabase.storage.from("images").getPublicUrl(path);
+              previewUrl = data.publicUrl;
+              lastPreviewSavedAtRef.current = now;
+            } else {
+              console.warn("Draft preview upload failed:", uploadError);
+            }
+          } finally {
+            previewSaveInFlightRef.current = false;
+          }
+        }
+
+        const name = `${defaultWorkName || "MyBoard"} (черновик)`;
+        const existingId = draftRowIdRef.current;
+        if (existingId) {
+          const updated = await updateDrawing({
+            id: existingId,
+            name,
+            content,
+            ...(previewUrl !== undefined ? { previewUrl } : {}),
+            roomId: draftRoom,
+          });
+          draftRowIdRef.current = updated.id;
+        } else {
+          const latest = await getLatestDrawingByRoom(draftRoom);
+          if (latest) {
+            const updated = await updateDrawing({
+              id: latest.id,
+              name,
+              content,
+              ...(previewUrl !== undefined ? { previewUrl } : {}),
+              roomId: draftRoom,
+            });
+            draftRowIdRef.current = updated.id;
+          } else {
+            const created = await createDrawing({
+              name,
+              content,
+              previewUrl: previewUrl ?? null,
+              roomId: draftRoom,
+            });
+            draftRowIdRef.current = created.id;
+          }
+        }
+        lastDraftSavedAtRef.current = now;
+        localStorage.setItem(DRAFT_EXPIRES_AT_KEY, String(now + DRAFT_GRACE_MS));
+        if (draftRowIdRef.current) {
+          localStorage.setItem(DRAFT_ROW_ID_KEY, draftRowIdRef.current);
+        }
+      } catch (e) {
+        console.warn("Draft autosave failed:", e);
+        bumpNetworkError();
+      } finally {
+        endNetworkOp();
+        draftSaveInFlightRef.current = false;
+      }
+    },
+    [buildDocumentSnapshot, bumpNetworkError, defaultWorkName],
+  );
 
   const setTextEditingVisuals = (text: fabric.IText) => {
     const fill = (typeof text.fill === "string" && text.fill ? text.fill : "#000000") as string;
@@ -217,7 +608,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const drawingIdToLoad = selectedDrawingId ?? idFromUrl ?? null;
 
   const loadDrawing = useCallback(
-    async (data: CanvasSnapshot, opts?: { isCancelled?: () => boolean }) => {
+    async (
+      data: CanvasSnapshot,
+      opts?: { isCancelled?: () => boolean; skipHistorySeed?: boolean },
+    ) => {
       const isCancelled = opts?.isCancelled ?? (() => false);
       const imgCanvas = imgCanvasRef.current;
       const textCanvas = textCanvasRef.current;
@@ -274,9 +668,41 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       lastInsertedImageRef.current = lastImage;
       lastTextObjectRef.current = lastText;
       recalcDocumentHeightRef.current?.();
+
+      if (!opts?.skipHistorySeed) {
+        try {
+          undoStackRef.current = [JSON.parse(JSON.stringify(snapshot)) as CanvasSnapshot];
+        } catch {
+          undoStackRef.current = [];
+        }
+        setCanUndo(false);
+      }
+      suppressHistoryUntilRef.current = Date.now() + 400;
     },
     [],
   );
+
+  const performUndo = useCallback(async () => {
+    if (undoStackRef.current.length <= 1) {
+      return;
+    }
+    undoStackRef.current.pop();
+    const prev = undoStackRef.current[undoStackRef.current.length - 1];
+    if (!prev) {
+      return;
+    }
+    isLoadingDrawingRef.current = true;
+    try {
+      await loadDrawing(JSON.parse(JSON.stringify(prev)) as CanvasSnapshot, {
+        skipHistorySeed: true,
+      });
+    } finally {
+      isLoadingDrawingRef.current = false;
+    }
+    setCanUndo(undoStackRef.current.length > 1);
+    suppressHistoryUntilRef.current = Date.now() + 400;
+    requestSaveRef.current?.();
+  }, [loadDrawing]);
 
   const handleNewDocument = useCallback(async () => {
     if (
@@ -306,11 +732,14 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         savedAt: new Date().toISOString(),
       };
       await loadDrawing(snapshot);
+      await persistSnapshotLocally(snapshot, { pendingSync: false });
+      await persistToDexie(snapshot);
       pendingImageStorageDeletesRef.current.clear();
       lastInsertedImageRef.current = null;
       lastTextObjectRef.current = null;
       setPencilColor(DEFAULT_PENCIL_COLOR);
       pencilColorRef.current = DEFAULT_PENCIL_COLOR;
+      setPencilWidth(DEFAULT_PENCIL_WIDTH);
       setTextFontSize(DEFAULT_TEXT_SIZE);
       textFontSizeRef.current = DEFAULT_TEXT_SIZE;
       setActiveTool("pencil");
@@ -324,7 +753,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     } finally {
       isLoadingDrawingRef.current = false;
     }
-  }, [loadDrawing, router]);
+  }, [loadDrawing, persistSnapshotLocally, persistToDexie, router]);
 
   useEffect(() => {
     if (
@@ -374,22 +803,40 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           beginNetworkOp();
           netStarted = true;
           await prepareImageLayerForSnapshot(imgCanvas);
-          const imgLayer = imgCanvas.toObject(SNAPSHOT_IMAGE_PROPS) as {
+          const imgLayer = imgCanvas.toObject([
+            ...SNAPSHOT_IMAGE_PROPS,
+            OBJECT_UPDATED_AT_KEY,
+          ]) as {
             objects?: unknown[];
           };
           assertImageJsonUsesRemoteSrcOnly(imgLayer);
-          const textLayer = textCanvas.toObject();
-          const drawLayer = drawCanvas.toObject();
+          const textLayer = textCanvas.toObject([OBJECT_UPDATED_AT_KEY]);
+          const drawLayer = drawCanvas.toObject([OBJECT_UPDATED_AT_KEY]);
+          const snapshot: CanvasSnapshot = {
+            imgLayer,
+            textLayer,
+            drawLayer,
+            canvasWidth: drawCanvas.getWidth(),
+            canvasHeight: drawCanvas.getHeight(),
+            savedAt: new Date().toISOString(),
+          };
+          await persistSnapshotLocally(snapshot, {
+            pendingSync: typeof navigator !== "undefined" && !navigator.onLine,
+          });
+          await persistToDexie(snapshot);
+          if (typeof navigator !== "undefined" && !navigator.onLine) {
+            return;
+          }
           const { error } = await supabase
             .from(SUPABASE_CANVAS_TABLE)
             .upsert(
               {
                 id: SUPABASE_DOCUMENT_ID,
-                img_layer: imgLayer,
-                text_layer: textLayer,
-                draw_layer: drawLayer,
-                canvas_height: drawCanvas.getHeight(),
-                updated_at: new Date().toISOString(),
+                img_layer: snapshot.imgLayer,
+                text_layer: snapshot.textLayer,
+                draw_layer: snapshot.drawLayer,
+                canvas_height: snapshot.canvasHeight,
+                updated_at: snapshot.savedAt,
               },
               { onConflict: "id" },
             );
@@ -397,7 +844,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           if (error) {
             console.warn("Supabase save failed:", error.message);
             bumpNetworkError();
+            await persistSnapshotLocally(snapshot, { pendingSync: true });
           } else {
+            await persistSnapshotLocally(snapshot, { pendingSync: false });
             const toRemove = [...pendingImageStorageDeletesRef.current];
             pendingImageStorageDeletesRef.current.clear();
             if (toRemove.length > 0) {
@@ -491,10 +940,65 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     recalcDocumentHeightRef.current = () => recalcDocumentHeight();
     window.addEventListener("resize", scheduleRecalc);
 
+    const undoSnapshotFingerprint = (s: CanvasSnapshot) =>
+      JSON.stringify({
+        imgLayer: s.imgLayer,
+        textLayer: s.textLayer,
+        drawLayer: s.drawLayer,
+        canvasWidth: s.canvasWidth,
+        canvasHeight: s.canvasHeight,
+      });
+
+    const commitUndoHistory = async () => {
+      if (isLoadingDrawingRef.current) {
+        return;
+      }
+      if (Date.now() < suppressHistoryUntilRef.current) {
+        return;
+      }
+      const ic = imgCanvasRef.current;
+      const tc = textCanvasRef.current;
+      const dc = drawCanvasRef.current;
+      if (!ic || !tc || !dc) {
+        return;
+      }
+      beginNetworkOp();
+      let snap: CanvasSnapshot;
+      try {
+        snap = await buildDocumentSnapshot(ic, tc, dc);
+      } finally {
+        endNetworkOp();
+      }
+      const fp = undoSnapshotFingerprint(snap);
+      const top = undoStackRef.current[undoStackRef.current.length - 1];
+      if (top && undoSnapshotFingerprint(top) === fp) {
+        return;
+      }
+      undoStackRef.current.push(JSON.parse(JSON.stringify(snap)) as CanvasSnapshot);
+      while (undoStackRef.current.length > 6) {
+        undoStackRef.current.shift();
+      }
+      setCanUndo(undoStackRef.current.length > 1);
+    };
+
+    let historyDebounce: ReturnType<typeof setTimeout> | null = null;
+    const scheduleUndoHistory = () => {
+      if (historyDebounce) {
+        clearTimeout(historyDebounce);
+      }
+      historyDebounce = setTimeout(() => {
+        historyDebounce = null;
+        void commitUndoHistory();
+      }, 480);
+    };
+
     drawCanvas.on("path:created", (event) => {
       if (!event.path) {
         return;
       }
+      ensureObjectUuid(event.path);
+      markObjectUpdatedAt(event.path);
+      void persistFabricObject("draw", event.path);
       if (activeToolRef.current === "pencil") {
         event.path.set({ stroke: pencilColorRef.current });
         event.path.globalCompositeOperation = "source-over";
@@ -573,18 +1077,47 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     });
 
     [imgCanvas, textCanvas, drawCanvas].forEach((canvas) => {
+      canvas.on("object:added", (evt) => {
+        const target = evt.target as fabric.Object | null;
+        ensureObjectUuid(target);
+        markObjectUpdatedAt(target);
+      });
+      canvas.on("object:modified", (evt) => markObjectUpdatedAt(evt.target as fabric.Object | null));
+      canvas.on("object:added", (evt) => {
+        const layer: "img" | "text" | "draw" =
+          canvas === imgCanvas ? "img" : canvas === textCanvas ? "text" : "draw";
+        void persistFabricObject(layer, evt.target as fabric.Object | null);
+      });
+      canvas.on("object:modified", (evt) => {
+        const layer: "img" | "text" | "draw" =
+          canvas === imgCanvas ? "img" : canvas === textCanvas ? "text" : "draw";
+        void persistFabricObject(layer, evt.target as fabric.Object | null);
+      });
       canvas.on("object:added", scheduleRecalc);
       canvas.on("object:removed", scheduleRecalc);
       canvas.on("object:modified", scheduleRecalc);
       canvas.on("object:added", queueSaveDocument);
       canvas.on("object:removed", queueSaveDocument);
       canvas.on("object:modified", queueSaveDocument);
+      canvas.on("object:added", () => {
+        void commitUndoHistory();
+      });
+      canvas.on("object:removed", () => {
+        void commitUndoHistory();
+      });
+      canvas.on("object:modified", () => {
+        scheduleUndoHistory();
+      });
     });
 
     setCanvasesReady(true);
 
     return () => {
       setCanvasesReady(false);
+      if (historyDebounce) {
+        clearTimeout(historyDebounce);
+        historyDebounce = null;
+      }
       window.removeEventListener("resize", scheduleRecalc);
       recalcDocumentHeightRef.current = null;
       requestSaveRef.current = null;
@@ -599,7 +1132,44 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       textCanvasRef.current = null;
       drawCanvasRef.current = null;
     };
-  }, []);
+  }, [beginNetworkOp, buildDocumentSnapshot, drawingIdToLoad, endNetworkOp, persistFabricObject]);
+
+  useEffect(() => {
+    const onOnline = () => {
+      void syncPendingLocalSnapshot();
+      void syncDexieCanvasObjectsWithSupabase().catch((e) =>
+        console.warn("Dexie sync on online failed:", e),
+      );
+      void syncOfflineChanges();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [syncOfflineChanges, syncPendingLocalSnapshot]);
+
+  useEffect(() => {
+    if (!canvasesReady) {
+      return;
+    }
+    const timer = window.setInterval(async () => {
+      if (typeof navigator !== "undefined" && navigator.onLine) {
+        return;
+      }
+      const imgCanvas = imgCanvasRef.current;
+      const textCanvas = textCanvasRef.current;
+      const drawCanvas = drawCanvasRef.current;
+      if (!imgCanvas || !textCanvas || !drawCanvas) {
+        return;
+      }
+      try {
+        const snapshot = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
+        await persistSnapshotLocally(snapshot, { pendingSync: true });
+        await persistToDexie(snapshot);
+      } catch (e) {
+        console.warn("Offline autosave to IndexedDB failed:", e);
+      }
+    }, OFFLINE_AUTOSAVE_MS);
+    return () => window.clearInterval(timer);
+  }, [buildDocumentSnapshot, canvasesReady, persistSnapshotLocally, persistToDexie]);
 
   useEffect(() => {
     if (!drawingIdToLoad) {
@@ -627,6 +1197,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           return;
         }
         await loadDrawing(snapshot, { isCancelled: () => isCancelled });
+        await persistSnapshotLocally(snapshot, { pendingSync: false });
+        await persistToDexie(snapshot);
       } catch (error) {
         console.warn("Failed to load drawing:", error);
         bumpNetworkError();
@@ -640,7 +1212,167 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     return () => {
       isCancelled = true;
     };
-  }, [drawingIdToLoad, loadDrawing]);
+  }, [drawingIdToLoad, loadDrawing, persistSnapshotLocally, persistToDexie]);
+
+  useEffect(() => {
+    if (!drawingIdToLoad) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("canvas_objects")
+          .select("id,drawing_id,object_id,layer,payload,updated_at,last_sync_tstamp")
+          .eq("drawing_id", drawingIdToLoad);
+        if (error) {
+          throw error;
+        }
+        if (cancelled) {
+          return;
+        }
+        const rows =
+          (data ?? []).map((row) => ({
+            id: String(row.id),
+            drawing_id: String(row.drawing_id),
+            object_id: String(row.object_id),
+            layer: row.layer as "img" | "text" | "draw",
+            payload: (row.payload ?? {}) as Record<string, unknown>,
+            updated_at: String(row.updated_at ?? new Date().toISOString()),
+            dirty: false,
+            last_sync_tstamp:
+              row.last_sync_tstamp != null ? String(row.last_sync_tstamp) : null,
+          })) ?? [];
+        await replaceDrawingCanvasObjectsLocal(drawingIdToLoad, rows);
+      } catch (e) {
+        console.warn("Failed to hydrate Dexie from Supabase canvas_objects:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [drawingIdToLoad]);
+
+  useEffect(() => {
+    if (!canvasesReady || drawingIdToLoad) {
+      return;
+    }
+    const imgCanvas = imgCanvasRef.current;
+    const textCanvas = textCanvasRef.current;
+    const drawCanvas = drawCanvasRef.current;
+    if (!imgCanvas || !textCanvas || !drawCanvas) {
+      return;
+    }
+    void (async () => {
+      try {
+        const snapshot = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
+        await persistSnapshotLocally(snapshot, { pendingSync: false });
+        await persistToDexie(snapshot);
+      } catch (e) {
+        console.warn("Initial local snapshot failed:", e);
+      }
+    })();
+  }, [buildDocumentSnapshot, canvasesReady, drawingIdToLoad, persistSnapshotLocally, persistToDexie]);
+
+  useEffect(() => {
+    if (!canvasesReady || drawingIdToLoad) {
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const snapshot = await loadSnapshotFromDexie();
+        if (!snapshot || cancelled) {
+          return;
+        }
+        isLoadingDrawingRef.current = true;
+        try {
+          await loadDrawing(snapshot);
+          await persistSnapshotLocally(snapshot, { pendingSync: true });
+        } finally {
+          isLoadingDrawingRef.current = false;
+        }
+      } catch (e) {
+        console.warn("Dexie offline load failed:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canvasesReady, drawingIdToLoad, loadDrawing, persistSnapshotLocally]);
+
+  useEffect(() => {
+    if (!canvasesReady) {
+      return;
+    }
+    const draftRoom = draftRoomIdRef.current;
+    if (!draftRoom || drawingIdToLoad) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const expRaw = localStorage.getItem(DRAFT_EXPIRES_AT_KEY);
+        const expiresAt = expRaw ? Number(expRaw) : 0;
+        const now = Date.now();
+        const latest = await getLatestDrawingByRoom(draftRoom);
+        if (cancelled || !latest) {
+          return;
+        }
+        if (Number.isFinite(expiresAt) && expiresAt > now) {
+          const shouldResume = window.confirm(
+            "Найден временный черновик. Продолжить работу с последнего автосохранения?",
+          );
+          if (shouldResume) {
+            isLoadingDrawingRef.current = true;
+            try {
+              await loadDrawing(latest.content);
+              draftRowIdRef.current = latest.id;
+              setDefaultWorkName(latest.name.replace(/\s*\(черновик\)\s*$/i, ""));
+            } finally {
+              isLoadingDrawingRef.current = false;
+            }
+          }
+        } else if (latest.id) {
+          await deleteDrawingById(latest.id);
+          localStorage.removeItem(DRAFT_ROW_ID_KEY);
+          localStorage.removeItem(DRAFT_EXPIRES_AT_KEY);
+        }
+      } catch (e) {
+        console.warn("Draft resume check failed:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canvasesReady, drawingIdToLoad, loadDrawing]);
+
+  useEffect(() => {
+    if (!canvasesReady) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (isLoadingDrawingRef.current) {
+        return;
+      }
+      void saveDraftSnapshot();
+    }, AUTOSAVE_DRAFT_MS);
+    return () => window.clearInterval(timer);
+  }, [canvasesReady, saveDraftSnapshot]);
+
+  useEffect(() => {
+    const onPageHide = () => {
+      if (didManualSaveRef.current) {
+        return;
+      }
+      void saveDraftSnapshot({ forcePreview: true });
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [saveDraftSnapshot]);
 
   useEffect(() => {
     isImageDeleteModeRef.current = isImageDeleteMode;
@@ -681,14 +1413,14 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       }
     } else {
       const brush = new fabric.PencilBrush(drawCanvas);
-      brush.width = 4;
+      brush.width = pencilWidth;
       brush.color = pencilColor;
       drawCanvas.freeDrawingBrush = brush;
     }
     drawCanvas.isDrawingMode =
       !isImageDeleteMode && (activeTool === "pencil" || activeTool === "eraser");
     textCanvas.defaultCursor = activeTool === "text" ? "text" : "default";
-  }, [activeTool, isImageDeleteMode, pencilColor]);
+  }, [activeTool, isImageDeleteMode, pencilColor, pencilWidth]);
 
   useEffect(() => {
     textFontSizeRef.current = textFontSize;
@@ -779,13 +1511,28 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     const trimmed = name.trim() || "MyBoard";
     setIsSavingToDrawings(true);
     beginNetworkOp();
+    didManualSaveRef.current = true;
     try {
       const content = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
+      await upsertProjectLocal({
+        id: drawingIdToLoad ?? SUPABASE_DOCUMENT_ID,
+        name: trimmed,
+        updated_at: content.savedAt,
+      });
       await createDrawing({
         name: trimmed,
         content,
-        roomId: "room-1",
+        roomId: collabRoomId,
       });
+      if (draftRowIdRef.current) {
+        try {
+          await deleteDrawingById(draftRowIdRef.current);
+        } catch (e) {
+          console.warn("Failed to remove draft after manual save:", e);
+        }
+      }
+      localStorage.removeItem(DRAFT_ROW_ID_KEY);
+      localStorage.removeItem(DRAFT_EXPIRES_AT_KEY);
       setDefaultWorkName(trimmed);
       const toRemove = [...pendingImageStorageDeletesRef.current];
       pendingImageStorageDeletesRef.current.clear();
@@ -801,6 +1548,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       console.warn("saveToSupabase failed:", error);
       bumpNetworkError();
     } finally {
+      didManualSaveRef.current = false;
       endNetworkOp();
       setIsSavingToDrawings(false);
     }
@@ -837,6 +1585,52 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     link.click();
   };
 
+  const shareBoardNative = async (): Promise<boolean> => {
+    const imgCanvas = imgCanvasRef.current;
+    const textCanvas = textCanvasRef.current;
+    const drawCanvas = drawCanvasRef.current;
+    if (!imgCanvas || !textCanvas || !drawCanvas || typeof navigator === "undefined") {
+      return false;
+    }
+
+    const width = drawCanvas.getWidth();
+    const height = drawCanvas.getHeight();
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = width;
+    exportCanvas.height = height;
+
+    const context = exportCanvas.getContext("2d");
+    if (!context) {
+      return false;
+    }
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(imgCanvas.lowerCanvasEl, 0, 0);
+    context.drawImage(textCanvas.lowerCanvasEl, 0, 0);
+    context.drawImage(drawCanvas.lowerCanvasEl, 0, 0);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      exportCanvas.toBlob((b) => resolve(b), "image/png"),
+    );
+    if (!blob) {
+      return false;
+    }
+
+    const file = new File([blob], `myboard-${Date.now()}.png`, { type: "image/png" });
+    const shareUrl = typeof window !== "undefined" ? window.location.href : undefined;
+    const shareData: ShareData = {
+      title: "MyBoard",
+      text: "Скриншот моей доски",
+      url: shareUrl,
+      files: [file],
+    };
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      await navigator.share(shareData);
+      return true;
+    }
+    return false;
+  };
+
   const onFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     const imgCanvas = imgCanvasRef.current;
@@ -865,13 +1659,34 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     }
   };
 
-  const topChromePx = STUDIO_CONSOLE_HEIGHT_PX;
+  const topChromePx = isMobileViewport ? 12 : STUDIO_CONSOLE_HEIGHT_PX;
+
+  const boardChrome = appearance.comfort ? "ivory" : appearance.inverted ? "dark" : "light";
+
+  useEffect(() => {
+    if (!canvasesReady) {
+      return;
+    }
+    const img = imgCanvasRef.current;
+    if (!img) {
+      return;
+    }
+    const bg = appearance.comfort ? "#faf8f3" : appearance.inverted ? "#0a0a0a" : "#ffffff";
+    img.set("backgroundColor", bg);
+    img.requestRenderAll();
+  }, [appearance.comfort, appearance.inverted, canvasesReady]);
 
   return (
-    <section className="relative h-screen overflow-hidden bg-gray-50">
+    <section
+      className={cn(
+        "relative h-screen overflow-hidden",
+        appearance.comfort ? "bg-[#eae5d6]" : appearance.inverted ? "bg-zinc-950" : "bg-gray-50",
+      )}
+    >
       <StudioConsole
         activeTool={activeTool}
         pencilColor={pencilColor}
+        pencilWidth={pencilWidth}
         isImageDeleteMode={isImageDeleteMode}
         isSavingToDrawings={isSavingToDrawings}
         isProcessing={isProcessing}
@@ -883,6 +1698,21 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         roomFull={roomFull}
         maxRoomParticipants={MAX_ROOM_PARTICIPANTS}
         fileInputRef={fileInputRef}
+        boardChrome={boardChrome}
+        boardOuterMaxClass={BOARD_OUTER_MAX_CLASS}
+        boardToolbarMaxClass="w-full max-w-[min(92vw,980px)] sm:max-w-[min(61.33vw,653px)]"
+        canUndo={canUndo}
+        onUndo={() => {
+          void performUndo();
+        }}
+        onMyBoardInvert={() => {
+          setAppearance((a) => ({ ...a, inverted: !a.inverted }));
+        }}
+        onMyBoardComfort={() => {
+          setAppearance((a) =>
+            a.comfort ? { inverted: false, comfort: false } : { ...a, comfort: true }
+          );
+        }}
         onNewDocument={handleNewDocument}
         onPaletteColor={(hex) => {
           clearTextEditingVisuals();
@@ -892,6 +1722,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           setIsImageDeleteMode(false);
           activeToolRef.current = "pencil";
           setActiveTool("pencil");
+        }}
+        onPencilWidthChange={(nextWidth) => {
+          setPencilWidth(nextWidth);
         }}
         onEraser={() => {
           clearTextEditingVisuals();
@@ -926,6 +1759,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           clearTextEditingVisuals();
           exportToPng();
         }}
+        onShareBoard={shareBoardNative}
         onFileChange={onFileSelected}
       />
 
@@ -933,10 +1767,22 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         className="h-full overflow-y-auto"
         style={{ paddingTop: `${topChromePx}px` }}
       >
-        <div className="mx-auto flex w-full max-w-[1200px] justify-center px-3 pb-8 pt-4">
+        <div
+          className={cn(
+            "mx-auto flex w-full justify-center px-3 pb-8 pt-4",
+            BOARD_OUTER_MAX_CLASS,
+          )}
+        >
           <div
             ref={boardContainerRef}
-            className="relative w-[min(92vw,980px)] overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm"
+            className={cn(
+              BOARD_WIDTH_CLASS,
+              appearance.comfort
+                ? "border-stone-300 bg-[#faf8f3]"
+                : appearance.inverted
+                  ? "border-zinc-700 bg-zinc-950"
+                  : "border-gray-200 bg-white",
+            )}
             style={{ height: `${canvasHeight}px` }}
           >
             <canvas ref={imgCanvasElementRef} className="absolute inset-0 z-[1]" />

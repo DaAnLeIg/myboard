@@ -7,6 +7,7 @@ import {
   Path,
   util,
 } from "fabric";
+import { decode as decodeMsgPack, encode as encodeMsgPack } from "@msgpack/msgpack";
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "../utils/supabaseClient";
 import { STORAGE_PATH_KEY } from "../utils/imageStorage";
@@ -18,9 +19,6 @@ const BROADCAST_CURSOR = "collab-cursor";
 export const ROOM_PARAM = "room";
 export const MAX_ROOM_PARTICIPANTS = 10;
 const COLLAB_ID_KEY = "mbCollabId";
-
-/** Сериализация URL, crossOrigin, mbStoragePath, mbCollabId для картинок. */
-const SNAPSHOT_PROPS: string[] = [STORAGE_PATH_KEY, "crossOrigin", COLLAB_ID_KEY];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function addCustomProp(C: any, name: string) {
@@ -97,6 +95,11 @@ type ObjectAddPayload = {
   object: Record<string, unknown>;
 };
 
+type EncodedPayload = {
+  codec: "msgpack-base64-v1";
+  data: string;
+};
+
 type ObjectRemovePayload = {
   type: "collab-object-remove";
   roomId: string;
@@ -127,9 +130,23 @@ export type RemoteCursor = {
 const CURSOR_TTL_MS = 8000;
 const CURSOR_THROTTLE_MS = 80;
 const MODIFY_DEBOUNCE_MS = 320;
+const DRAW_COORDS_THROTTLE_MS = 24;
+
+type DrawEnvelope = {
+  action: "draw" | "add";
+  type: string;
+  data: Record<string, unknown>;
+};
+
+function isFabricImageType(t: string | undefined): boolean {
+  return t === "Image" || t === "image";
+}
 
 function applyCrossOriginToImageData(obj: Record<string, unknown>) {
-  if (obj.type === "Image" && typeof (obj as { src?: string }).src === "string") {
+  if (
+    isFabricImageType(obj.type as string) &&
+    typeof (obj as { src?: string }).src === "string"
+  ) {
     const s = (obj as { src: string }).src;
     if (s.startsWith("http://") || s.startsWith("https://")) {
       (obj as { crossOrigin: string | null }).crossOrigin = "anonymous";
@@ -175,6 +192,79 @@ const TRANSFORM_KEYS: (keyof FabricObject | string)[] = [
   "path",
 ];
 
+function bytesToBase64(bytes: Uint8Array): string {
+  if (typeof window === "undefined" || typeof window.btoa !== "function") {
+    throw new Error("collab: btoa is unavailable");
+  }
+  let binary = "";
+  for (const b of bytes) {
+    binary += String.fromCharCode(b);
+  }
+  return window.btoa(binary);
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  if (typeof window === "undefined" || typeof window.atob !== "function") {
+    throw new Error("collab: atob is unavailable");
+  }
+  const binary = window.atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
+}
+
+function packPayload<T extends object>(payload: T): EncodedPayload {
+  return {
+    codec: "msgpack-base64-v1",
+    data: bytesToBase64(encodeMsgPack(payload)),
+  };
+}
+
+function unpackPayload<T>(raw: unknown): T | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const encoded = raw as Partial<EncodedPayload>;
+  if (encoded.codec !== "msgpack-base64-v1" || typeof encoded.data !== "string") {
+    return null;
+  }
+  try {
+    return decodeMsgPack(base64ToBytes(encoded.data)) as T;
+  } catch (e) {
+    console.warn("collab: msgpack decode failed", e);
+    return null;
+  }
+}
+
+function findObjectByCollabId(
+  canvas: Canvas,
+  collabId: string,
+): FabricObject | undefined {
+  return canvas.getObjects().find((o) => {
+    const v = (o as FabricObject & { get: (k: string) => unknown }).get(COLLAB_ID_KEY);
+    return typeof v === "string" && v === collabId;
+  });
+}
+
+function getRemoteImageSrc(obj: FabricObject): string | undefined {
+  const getSrc = (obj as FabricImage & { getSrc?: () => string }).getSrc;
+  if (typeof getSrc === "function") {
+    const s = getSrc.call(obj);
+    if (typeof s === "string" && (s.startsWith("http://") || s.startsWith("https://"))) {
+      return s;
+    }
+  }
+  const el = (obj as FabricImage & { getElement?: () => unknown }).getElement?.();
+  if (el instanceof HTMLImageElement && el.src) {
+    if (el.src.startsWith("http://") || el.src.startsWith("https://")) {
+      return el.src;
+    }
+  }
+  return undefined;
+}
+
 function pickTransform(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -188,54 +278,152 @@ function pickTransform(
   return o;
 }
 
+function wrapDrawEvent(
+  action: DrawEnvelope["action"],
+  objectType: string,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    action,
+    type: objectType,
+    data,
+  };
+}
+
+function unwrapDrawEvent(payload: Record<string, unknown>): Record<string, unknown> {
+  const action = payload.action;
+  const t = payload.type;
+  const data = payload.data;
+  if (
+    (action === "draw" || action === "add") &&
+    typeof t === "string" &&
+    data &&
+    typeof data === "object"
+  ) {
+    return {
+      ...(data as Record<string, unknown>),
+      type: t,
+    };
+  }
+  return payload;
+}
+
 async function upsertObjectOnCanvas(
   layer: LayerId,
-  data: Record<string, unknown>,
+  raw: Record<string, unknown>,
   getCanvas: (layer: LayerId) => Canvas | null,
   isApplyingRemoteRef: { current: boolean },
 ): Promise<void> {
+  const data = unwrapDrawEvent(raw);
   const canvas = getCanvas(layer);
   if (!canvas) {
     return;
   }
 
   const collabId = data[COLLAB_ID_KEY] as string | undefined;
-  if (collabId) {
-    const toRemove = canvas
-      .getObjects()
-      .filter((o) => (o as FabricObject & { get: (k: string) => unknown }).get(COLLAB_ID_KEY) === collabId);
-    for (const o of toRemove) {
-      canvas.remove(o);
-    }
-  }
+  const existing =
+    collabId && collabId.length > 0 ? findObjectByCollabId(canvas, collabId) : undefined;
 
   isApplyingRemoteRef.current = true;
   try {
-    if (data.type === "Image" && typeof (data as { src?: string }).src === "string") {
+    if (isFabricImageType(data.type as string) && typeof (data as { src?: string }).src === "string") {
       const src = (data as { src: string }).src;
       const isRemote = src.startsWith("http://") || src.startsWith("https://");
-      if (isRemote) {
-        const img = await FabricImage.fromURL(src, { crossOrigin: "anonymous" });
-        img.set(pickTransform(data));
-        applyCrossOriginToImageData({ ...data, type: "Image" } as Record<string, unknown>);
-        if (data[STORAGE_PATH_KEY] != null) {
-          (img as FabricObject & { set: (a: object) => void }).set({
-            [STORAGE_PATH_KEY]: data[STORAGE_PATH_KEY],
+      if (!isRemote) {
+        return;
+      }
+
+      if (existing && isFabricImageType(existing.type)) {
+        const prevSrc = getRemoteImageSrc(existing);
+        const tr = pickTransform(data);
+        if (typeof prevSrc === "string" && prevSrc !== src) {
+          canvas.remove(existing);
+          const img = await FabricImage.fromURL(src, { crossOrigin: "anonymous" });
+          img.set(tr);
+          if (data[STORAGE_PATH_KEY] != null) {
+            (img as FabricObject & { set: (a: object) => void }).set({
+              [STORAGE_PATH_KEY]: data[STORAGE_PATH_KEY],
+              crossOrigin: (data as { crossOrigin?: string | null }).crossOrigin ?? "anonymous",
+            });
+          } else {
+            (img as FabricObject & { set: (a: object) => void }).set({ crossOrigin: "anonymous" });
+          }
+          if (collabId) {
+            (img as FabricObject & { set: (k: string, v: string) => void }).set(COLLAB_ID_KEY, collabId);
+          }
+          canvas.add(img);
+        } else {
+          existing.set({
+            ...tr,
             crossOrigin: (data as { crossOrigin?: string | null }).crossOrigin ?? "anonymous",
           });
-        } else {
-          (img as FabricObject & { set: (a: object) => void }).set({
-            crossOrigin: "anonymous",
-          });
+          if (data[STORAGE_PATH_KEY] != null) {
+            (existing as FabricObject & { set: (a: object) => void }).set({
+              [STORAGE_PATH_KEY]: data[STORAGE_PATH_KEY],
+            });
+          }
         }
-        if (collabId) {
-          (img as FabricObject & { set: (k: string, v: string) => void }).set(
-            COLLAB_ID_KEY,
-            collabId,
-          );
-        }
-        canvas.add(img);
         canvas.discardActiveObject();
+        canvas.requestRenderAll();
+        return;
+      }
+
+      const img = await FabricImage.fromURL(src, { crossOrigin: "anonymous" });
+      img.set(pickTransform(data));
+      applyCrossOriginToImageData({ ...data, type: "Image" } as Record<string, unknown>);
+      if (data[STORAGE_PATH_KEY] != null) {
+        (img as FabricObject & { set: (a: object) => void }).set({
+          [STORAGE_PATH_KEY]: data[STORAGE_PATH_KEY],
+          crossOrigin: (data as { crossOrigin?: string | null }).crossOrigin ?? "anonymous",
+        });
+      } else {
+        (img as FabricObject & { set: (a: object) => void }).set({
+          crossOrigin: "anonymous",
+        });
+      }
+      if (collabId) {
+        (img as FabricObject & { set: (k: string, v: string) => void }).set(COLLAB_ID_KEY, collabId);
+      }
+      canvas.add(img);
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+      return;
+    }
+
+    if (existing && collabId) {
+      const incomingPath =
+        data.type === "path" || data.type === "Path";
+      const isPathObj = existing.type === "path" || existing.type === "Path";
+      if (incomingPath && isPathObj) {
+        const nextPath = (data as { path?: unknown }).path;
+        existing.set({
+          ...pickTransform(data),
+          ...(Array.isArray(nextPath) ? { path: nextPath } : {}),
+          fill: (data as { fill?: unknown }).fill,
+          stroke: (data as { stroke?: unknown }).stroke,
+          strokeWidth: (data as { strokeWidth?: unknown }).strokeWidth,
+          globalCompositeOperation: (data as { globalCompositeOperation?: unknown })
+            .globalCompositeOperation,
+        } as object);
+        canvas.requestRenderAll();
+        return;
+      }
+      const incomingText =
+        data.type === "IText" ||
+        data.type === "i-text" ||
+        data.type === "textbox";
+      const isTextObj =
+        existing.type === "IText" ||
+        existing.type === "i-text" ||
+        existing.type === "textbox";
+      if (incomingText && isTextObj) {
+        existing.set({
+          ...pickTransform(data),
+          text: (data as { text?: string }).text,
+          fontSize: (data as { fontSize?: number }).fontSize,
+          fontFamily: (data as { fontFamily?: string }).fontFamily,
+          fill: (data as { fill?: unknown }).fill,
+        } as object);
         canvas.requestRenderAll();
         return;
       }
@@ -248,10 +436,7 @@ async function upsertObjectOnCanvas(
       return;
     }
     if (collabId) {
-      (el as FabricObject & { set: (k: string, v: string) => void }).set(
-        COLLAB_ID_KEY,
-        collabId,
-      );
+      (el as FabricObject & { set: (k: string, v: string) => void }).set(COLLAB_ID_KEY, collabId);
     }
     canvas.add(el);
     canvas.discardActiveObject();
@@ -326,7 +511,8 @@ export function useRoomCollaboration({
   roomFullRef.current = roomFull;
   const textModTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imgModTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const drawModTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const drawLastSentAtRef = useRef(0);
+  const lastPathSendRef = useRef<{ collabId: string; at: number } | null>(null);
 
   const share = useMemo(() => {
     if (typeof window === "undefined") {
@@ -370,13 +556,14 @@ export function useRoomCollaboration({
     const channel = supabase.channel(`board:${roomId}`) as any;
 
     const onObjectAdd = (message: { payload?: ObjectAddPayload }) => {
-      const p = message.payload;
+      const p = unpackPayload<ObjectAddPayload>(message.payload);
       if (!p || p.type !== "collab-object-add" || p.roomId !== roomId) {
         return;
       }
       if (p.senderId === clientIdRef.current) {
         return;
       }
+      console.log("Получено:", p);
       if (p.object) {
         void upsertObjectOnCanvas(
           p.layer,
@@ -388,7 +575,7 @@ export function useRoomCollaboration({
     };
 
     const onObjectRemove = (message: { payload?: ObjectRemovePayload }) => {
-      const p = message.payload;
+      const p = unpackPayload<ObjectRemovePayload>(message.payload);
       if (!p || p.type !== "collab-object-remove" || p.roomId !== roomId) {
         return;
       }
@@ -406,7 +593,7 @@ export function useRoomCollaboration({
     };
 
     const onCur = (message: { payload?: CursorPayload }) => {
-      const p = message.payload;
+      const p = unpackPayload<CursorPayload>(message.payload);
       if (!p || p.type !== "collab-cursor" || p.roomId !== roomId) {
         return;
       }
@@ -450,9 +637,13 @@ export function useRoomCollaboration({
       if (isApplyingRemoteRef.current || isRestoringRef.current || roomFullRef.current) {
         return;
       }
-      void channel
-        .send({ type: "broadcast", event: BROADCAST_ADD_OBJECT, payload })
-        .catch((e: unknown) => console.warn("collab send", e));
+      const data = {
+        type: "broadcast",
+        event: BROADCAST_ADD_OBJECT,
+        payload: packPayload(payload),
+      };
+      console.log("Отправлено:", data);
+      void channel.send(data).catch((e: unknown) => console.warn("collab send", e));
     };
 
     const sendRemove = (payload: ObjectRemovePayload) => {
@@ -460,7 +651,11 @@ export function useRoomCollaboration({
         return;
       }
       void channel
-        .send({ type: "broadcast", event: BROADCAST_REMOVE_OBJECT, payload })
+        .send({
+          type: "broadcast",
+          event: BROADCAST_REMOVE_OBJECT,
+          payload: packPayload(payload),
+        })
         .catch((e: unknown) => console.warn("collab send remove", e));
     };
 
@@ -469,7 +664,11 @@ export function useRoomCollaboration({
         return;
       }
       void channel
-        .send({ type: "broadcast", event: BROADCAST_CURSOR, payload: cursorPayload })
+        .send({
+          type: "broadcast",
+          event: BROADCAST_CURSOR,
+          payload: packPayload(cursorPayload),
+        })
         .catch((e: unknown) => console.warn("collab cursor", e));
     };
 
@@ -497,16 +696,28 @@ export function useRoomCollaboration({
         return;
       }
       ensureCollabId(o);
-      const d = o.toObject() as unknown as Record<string, unknown>;
-      d[COLLAB_ID_KEY] = (o as FabricObject & { get: (k: string) => unknown }).get(
-        COLLAB_ID_KEY,
-      );
+      const d: Record<string, unknown> = {
+        type: "IText",
+        left: o.left,
+        top: o.top,
+        scaleX: o.scaleX,
+        scaleY: o.scaleY,
+        angle: o.angle,
+        opacity: o.opacity,
+        originX: o.originX,
+        originY: o.originY,
+        text: o.text,
+        fontSize: o.fontSize,
+        fontFamily: o.fontFamily,
+        fill: o.fill,
+      };
+      d[COLLAB_ID_KEY] = (o as FabricObject & { get: (k: string) => unknown }).get(COLLAB_ID_KEY);
       sendAdd({
         type: "collab-object-add",
         roomId,
         senderId: clientIdRef.current,
         layer: "text",
-        object: d,
+        object: wrapDrawEvent("add", "IText", d),
       });
     };
 
@@ -514,22 +725,45 @@ export function useRoomCollaboration({
       if (isApplyingRemoteRef.current || isRestoringRef.current) {
         return;
       }
-      if (!(obj.type === "Image" || (obj as FabricObject & { get: (k: string) => unknown }).get("type") === "Image")) {
+      if (!isFabricImageType(obj.type)) {
         return;
       }
       ensureCollabId(obj);
-      const d = (obj as FabricObject & { toObject: (props?: string[]) => object }).toObject(
-        SNAPSHOT_PROPS,
-      ) as unknown as Record<string, unknown>;
+      const src = getRemoteImageSrc(obj);
+      if (!src) {
+        return;
+      }
+      const storagePath = (obj as FabricObject & { get: (k: string) => unknown }).get(
+        STORAGE_PATH_KEY,
+      );
+      const d: Record<string, unknown> = {
+        type: "image",
+        src,
+        left: obj.left,
+        top: obj.top,
+        scaleX: obj.scaleX,
+        scaleY: obj.scaleY,
+        angle: obj.angle,
+        opacity: obj.opacity,
+        originX: obj.originX,
+        originY: obj.originY,
+      };
       d[COLLAB_ID_KEY] = (obj as FabricObject & { get: (k: string) => unknown }).get(
         COLLAB_ID_KEY,
       );
+      if (storagePath != null) {
+        d[STORAGE_PATH_KEY] = storagePath;
+      }
+      const co = (obj as FabricObject & { get: (k: string) => unknown }).get("crossOrigin");
+      if (co != null) {
+        d.crossOrigin = co;
+      }
       sendAdd({
         type: "collab-object-add",
         roomId,
         senderId: clientIdRef.current,
         layer: "img",
-        object: d,
+        object: wrapDrawEvent("add", "image", d),
       });
     };
 
@@ -541,28 +775,60 @@ export function useRoomCollaboration({
         return;
       }
       ensureCollabId(o);
-      const d = o.toObject() as unknown as Record<string, unknown>;
-      d[COLLAB_ID_KEY] = (o as FabricObject & { get: (k: string) => unknown }).get(
-        COLLAB_ID_KEY,
-      );
+      const pathObj = o as Path;
+      const d: Record<string, unknown> = {
+        type: "path",
+        left: o.left,
+        top: o.top,
+        scaleX: o.scaleX,
+        scaleY: o.scaleY,
+        angle: o.angle,
+        opacity: o.opacity,
+        originX: o.originX,
+        originY: o.originY,
+        stroke: o.stroke,
+        strokeWidth: o.strokeWidth,
+        strokeLineCap: o.strokeLineCap,
+        strokeLineJoin: o.strokeLineJoin,
+        globalCompositeOperation: o.globalCompositeOperation,
+        path: pathObj.path,
+      };
+      d[COLLAB_ID_KEY] = (o as FabricObject & { get: (k: string) => unknown }).get(COLLAB_ID_KEY);
       sendAdd({
         type: "collab-object-add",
         roomId,
         senderId: clientIdRef.current,
         layer: "draw",
-        object: d,
+        object: wrapDrawEvent("draw", "path", d),
       });
     };
 
-    const onPath = (e: { path?: FabricObject | null }) => {
-      const p = e.path;
-      if (!p || isRestoringRef.current || isApplyingRemoteRef.current) {
+    const broadcastFinishedDrawPath = (t: FabricObject | null | undefined) => {
+      if (!t || isRestoringRef.current || isApplyingRemoteRef.current) {
         return;
       }
-      if (!p.toObject) {
+      if (t.type !== "Path" && t.type !== "path") {
         return;
       }
-      sendPathUpsert(p);
+      ensureCollabId(t);
+      const collabId = (t as FabricObject & { get: (k: string) => unknown }).get(
+        COLLAB_ID_KEY,
+      ) as string;
+      const now = Date.now();
+      const prev = lastPathSendRef.current;
+      if (prev && prev.collabId === collabId && now - prev.at < 150) {
+        return;
+      }
+      lastPathSendRef.current = { collabId, at: now };
+      sendPathUpsert(t);
+    };
+
+    const onDrawMouseUp = (e: { target?: FabricObject | null }) => {
+      broadcastFinishedDrawPath(e.target ?? null);
+    };
+
+    const onPathCreatedCollab = (e: { path?: FabricObject | null }) => {
+      broadcastFinishedDrawPath(e.path ?? null);
     };
 
     const onText = (e: { target: FabricObject | null }) => {
@@ -598,7 +864,7 @@ export function useRoomCollaboration({
       if (!t || isRestoringRef.current || isApplyingRemoteRef.current) {
         return;
       }
-      if (t.type !== "Image" && (t as FabricObject & { get?: (k: string) => string }).get?.("type") !== "Image") {
+      if (!isFabricImageType(t.type)) {
         return;
       }
       sendImageUpsert(t);
@@ -609,7 +875,7 @@ export function useRoomCollaboration({
       if (!t || isRestoringRef.current || isApplyingRemoteRef.current) {
         return;
       }
-      if (t.type !== "Image" && (t as FabricObject & { get?: (k: string) => string }).get?.("type") !== "Image") {
+      if (!isFabricImageType(t.type)) {
         return;
       }
       if (imgModTimer.current) {
@@ -629,13 +895,12 @@ export function useRoomCollaboration({
       if (t.type !== "Path" && t.type !== "path") {
         return;
       }
-      if (drawModTimer.current) {
-        clearTimeout(drawModTimer.current);
+      const now = performance.now();
+      if (now - drawLastSentAtRef.current < DRAW_COORDS_THROTTLE_MS) {
+        return;
       }
-      drawModTimer.current = setTimeout(() => {
-        drawModTimer.current = null;
-        sendPathUpsert(t);
-      }, MODIFY_DEBOUNCE_MS);
+      drawLastSentAtRef.current = now;
+      sendPathUpsert(t);
     };
 
     const onPointer = (ev: PointerEvent) => {
@@ -672,7 +937,8 @@ export function useRoomCollaboration({
 
     const b = boardContainerRef.current;
     b?.addEventListener("pointermove", onPointer, { passive: true });
-    drawC.on("path:created", onPath);
+    drawC.on("mouse:up", onDrawMouseUp);
+    drawC.on("path:created", onPathCreatedCollab);
     textC.on("object:added", onText);
     textC.on("object:modified", onTextModified);
     imgC.on("object:added", onImg);
@@ -730,11 +996,9 @@ export function useRoomCollaboration({
       if (imgModTimer.current) {
         clearTimeout(imgModTimer.current);
       }
-      if (drawModTimer.current) {
-        clearTimeout(drawModTimer.current);
-      }
       b?.removeEventListener("pointermove", onPointer);
-      drawC.off("path:created", onPath);
+      drawC.off("mouse:up", onDrawMouseUp);
+      drawC.off("path:created", onPathCreatedCollab);
       textC.off("object:added", onText);
       textC.off("object:modified", onTextModified);
       imgC.off("object:added", onImg);

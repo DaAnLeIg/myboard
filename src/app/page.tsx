@@ -4,7 +4,6 @@ import { Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import Canvas from "../../components/Canvas";
-import SavedWorksList from "../../components/SavedWorksList";
 
 function HomeContent() {
   const searchParams = useSearchParams();
@@ -15,15 +14,7 @@ function HomeContent() {
     setSelectedDrawingId(id ?? null);
   }, [searchParams]);
 
-  return (
-    <>
-      <Canvas selectedDrawingId={selectedDrawingId} />
-      <SavedWorksList
-        selectedDrawingId={selectedDrawingId}
-        onSelectDrawing={setSelectedDrawingId}
-      />
-    </>
-  );
+  return <Canvas selectedDrawingId={selectedDrawingId} />;
 }
 
 export default function Home() {

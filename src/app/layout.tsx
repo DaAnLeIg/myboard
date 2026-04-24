@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { Providers } from "../../components/Providers";
@@ -18,7 +18,6 @@ export const metadata: Metadata = {
   title: "MyBoard",
   description: "Canvas board for drawings, text, and images.",
   manifest: "/manifest.json",
-  themeColor: "#000000",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -28,12 +27,18 @@ export const metadata: Metadata = {
     icon: [
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/icon-maskable-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-maskable-512.png", sizes: "512x512", type: "image/png" },
       { url: "/app-icon.svg", type: "image/svg+xml" },
       { url: "/favicon.ico" },
     ],
     apple: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
     shortcut: ["/favicon.ico"],
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#000000",
 };
 
 export default function RootLayout({

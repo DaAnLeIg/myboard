@@ -10,4 +10,17 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 // Один инстанс на `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 // 403 при корректном id чаще из‑за RLS, чем из‑за «не той» anon_key — сначала проверь политики для `drawings`.
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const clientFetch: typeof fetch = async (input, init) => {
+  const headers = new Headers(init?.headers ?? {});
+  if (typeof window !== "undefined") {
+    const ownerToken = localStorage.getItem("myboard_owner_token");
+    if (ownerToken) {
+      headers.set("x-owner-token", ownerToken);
+    }
+  }
+  return fetch(input, { ...init, headers });
+};
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: clientFetch },
+});

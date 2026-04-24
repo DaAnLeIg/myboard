@@ -6,27 +6,33 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   CircleAlert,
+  DoorOpen,
   Download,
   Eraser,
   Image as ImageIcon,
   Library,
   Loader2,
+  Menu,
   Pencil,
   Plus,
-  RefreshCw,
   Save,
   Share2,
   Trash2,
   Type,
+  Undo2,
+  X,
 } from "lucide-react";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
-import { useSavedWorksRefresh } from "../contexts/SavedWorksRefreshContext";
+import { cn } from "../utils/cn";
 import { ROOM_PARAM } from "../hooks/useCollaboration";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Slider } from "./ui/slider";
+import { ColorPicker } from "./ui/color-picker";
 
 const ICON = 1.75 as const;
 
-/** Высота фиксированной консоли: верхняя панель + строка «комната». */
-export const STUDIO_CONSOLE_HEIGHT_PX = 92;
+/** Высота фиксированной консоли (одна строка на десктопе). */
+export const STUDIO_CONSOLE_HEIGHT_PX = 56;
 /** @deprecated Используйте STUDIO_CONSOLE_HEIGHT_PX */
 export const TOOLBAR_HEIGHT_PX = STUDIO_CONSOLE_HEIGHT_PX;
 
@@ -43,11 +49,6 @@ export const PENCIL_SWATCHES = [
 
 export type TextSizeOption = 10 | 14 | 18;
 
-const navLinkClass = (active: boolean) =>
-  `inline-flex items-center justify-center gap-0 rounded-full border border-zinc-200 bg-white px-2.5 text-sm font-medium shadow-sm transition hover:bg-gray-100 ${
-    active ? "border-zinc-400 bg-gray-100 text-zinc-900" : "text-zinc-900"
-  }`;
-
 /** Плавающая панель инструментов. */
 const floatingToolbar =
   "inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-2xl bg-white px-2.5 py-1.5 shadow-lg";
@@ -63,9 +64,12 @@ const toolButtonInactive = "bg-transparent hover:bg-gray-100";
 
 const toolButtonActive = "bg-gray-200";
 
+export type BoardChrome = "light" | "dark" | "ivory";
+
 type StudioConsoleProps = {
   activeTool: Tool;
   pencilColor: string;
+  pencilWidth: 1 | 3 | 5;
   isImageDeleteMode: boolean;
   isSavingToDrawings: boolean;
   /** Фоновые сетевые операции (Supabase, Storage, подготовка снимка). */
@@ -79,7 +83,15 @@ type StudioConsoleProps = {
   roomFull: boolean;
   maxRoomParticipants: number;
   fileInputRef: RefObject<HTMLInputElement | null>;
+  boardChrome: BoardChrome;
+  boardOuterMaxClass: string;
+  boardToolbarMaxClass: string;
+  canUndo: boolean;
+  onUndo: () => void;
+  onMyBoardInvert: () => void;
+  onMyBoardComfort: () => void;
   onPaletteColor: (hex: string) => void;
+  onPencilWidthChange: (nextWidth: 1 | 3 | 5) => void;
   onEraser: () => void;
   onTextSize: (px: TextSizeOption) => void;
   onAddText: () => void;
@@ -88,6 +100,7 @@ type StudioConsoleProps = {
   onSaveToDatabase: (name: string) => void | Promise<void>;
   defaultWorkName: string;
   onExportPng: () => void;
+  onShareBoard?: () => Promise<boolean>;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onNewDocument?: () => void | Promise<void>;
 };
@@ -95,6 +108,7 @@ type StudioConsoleProps = {
 export default function StudioConsole({
   activeTool,
   pencilColor,
+  pencilWidth,
   isImageDeleteMode,
   isSavingToDrawings,
   isProcessing = false,
@@ -106,7 +120,15 @@ export default function StudioConsole({
   roomFull,
   maxRoomParticipants,
   fileInputRef,
+  boardChrome,
+  boardOuterMaxClass,
+  boardToolbarMaxClass,
+  canUndo,
+  onUndo,
+  onMyBoardInvert,
+  onMyBoardComfort,
   onPaletteColor,
+  onPencilWidthChange,
   onEraser,
   onTextSize,
   onAddText,
@@ -115,14 +137,58 @@ export default function StudioConsole({
   onSaveToDatabase,
   defaultWorkName,
   onExportPng,
+  onShareBoard,
   onFileChange,
   onNewDocument,
 }: StudioConsoleProps) {
   const path = usePathname();
   const { isOpen: libraryOpen, open: openLibrary } = useLibraryModal();
-  const { request: requestSavedListRefresh } = useSavedWorksRefresh();
   const isHome = path === "/";
   const isLibrary = libraryOpen;
+  const dark = boardChrome === "dark";
+  const ivory = boardChrome === "ivory";
+
+  const navLinkClass = (active: boolean) =>
+    cn(
+      "inline-flex items-center justify-center gap-0 rounded-full border px-2.5 text-sm font-medium shadow-sm transition",
+      dark
+        ? active
+          ? "border-zinc-500 bg-zinc-800 text-zinc-100"
+          : "border-zinc-600 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
+        : ivory
+          ? active
+            ? "border-stone-400 bg-[#ddd8c8] text-stone-900"
+            : "border-stone-300 bg-[#e8e4d4] text-stone-900 hover:bg-[#ddd8c8]"
+          : active
+            ? "border-zinc-400 bg-gray-100 text-zinc-900"
+            : "border-zinc-200 bg-white text-zinc-900 hover:bg-gray-100",
+    );
+
+  const myBoardChipClass = () =>
+    cn(
+      "inline-flex h-9 min-w-9 items-center justify-center gap-0 rounded-full border px-2.5 text-sm font-medium shadow-md transition",
+      ivory
+        ? "border-stone-400 bg-[#e0dbc9] text-stone-900 hover:bg-[#d5cfbc]"
+        : dark
+          ? "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-100"
+          : "border-zinc-800 bg-zinc-900 text-white hover:bg-zinc-800",
+    );
+
+  const myBoardLongTimerRef = useRef<number | null>(null);
+  const myBoardLongConsumedRef = useRef(false);
+
+  const clearMyBoardLongTimer = () => {
+    if (myBoardLongTimerRef.current != null) {
+      window.clearTimeout(myBoardLongTimerRef.current);
+      myBoardLongTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      clearMyBoardLongTimer();
+    };
+  }, []);
 
   const isPencilActive = activeTool === "pencil" && !isImageDeleteMode;
   const isEraserActive = activeTool === "eraser" && !isImageDeleteMode;
@@ -196,6 +262,19 @@ export default function StudioConsole({
   };
 
   const [refreshErrorFlash, setRefreshErrorFlash] = useState(false);
+  const [mobileRoomOpen, setMobileRoomOpen] = useState(false);
+  const [desktopRoomOpen, setDesktopRoomOpen] = useState(false);
+  const [mobileFabOpen, setMobileFabOpen] = useState(false);
+  const [mobileFabPinned, setMobileFabPinned] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mobileDockPos, setMobileDockPos] = useState({ x: 16, y: 16 });
+  const fabLongPressTimerRef = useRef<number | null>(null);
+  const fabLongPressTriggeredRef = useRef(false);
+  const panelLongPressTimerRef = useRef<number | null>(null);
+  const dragTimerRef = useRef<number | null>(null);
+  const dragActiveRef = useRef(false);
+  const dragPointerIdRef = useRef<number | null>(null);
+  const dragStartRef = useRef({ x: 0, y: 0, baseX: 16, baseY: 16 });
 
   useEffect(() => {
     if (!networkErrorTick) {
@@ -210,7 +289,97 @@ export default function StudioConsole({
     onBackgroundNetworkError?.();
   };
 
+  const clearFabLongPressTimer = () => {
+    if (fabLongPressTimerRef.current != null) {
+      window.clearTimeout(fabLongPressTimerRef.current);
+      fabLongPressTimerRef.current = null;
+    }
+  };
+
+  const clearPanelLongPressTimer = () => {
+    if (panelLongPressTimerRef.current != null) {
+      window.clearTimeout(panelLongPressTimerRef.current);
+      panelLongPressTimerRef.current = null;
+    }
+  };
+
+  const clearDragTimer = () => {
+    if (dragTimerRef.current != null) {
+      window.clearTimeout(dragTimerRef.current);
+      dragTimerRef.current = null;
+    }
+  };
+
+  const startDragHold = (ev: React.PointerEvent<HTMLElement>) => {
+    clearDragTimer();
+    dragPointerIdRef.current = ev.pointerId;
+    dragStartRef.current = {
+      x: ev.clientX,
+      y: ev.clientY,
+      baseX: mobileDockPos.x,
+      baseY: mobileDockPos.y,
+    };
+    dragActiveRef.current = false;
+    dragTimerRef.current = window.setTimeout(() => {
+      dragActiveRef.current = true;
+    }, 350);
+  };
+
+  const moveDragHold = (ev: React.PointerEvent<HTMLElement>) => {
+    if (!dragActiveRef.current || dragPointerIdRef.current !== ev.pointerId) {
+      return;
+    }
+    const dx = dragStartRef.current.x - ev.clientX;
+    const dy = dragStartRef.current.y - ev.clientY;
+    setMobileDockPos({
+      x: Math.max(8, Math.min(window.innerWidth - 72, dragStartRef.current.baseX + dx)),
+      y: Math.max(8, Math.min(window.innerHeight - 72, dragStartRef.current.baseY + dy)),
+    });
+  };
+
+  const endDragHold = () => {
+    clearDragTimer();
+    dragActiveRef.current = false;
+    dragPointerIdRef.current = null;
+  };
+
+  const startFabLongPress = () => {
+    clearFabLongPressTimer();
+    fabLongPressTriggeredRef.current = false;
+    fabLongPressTimerRef.current = window.setTimeout(() => {
+      fabLongPressTriggeredRef.current = true;
+      setMobileFabPinned(true);
+      setMobileFabOpen(true);
+    }, 550);
+  };
+
+  const toggleFab = () => {
+    if (fabLongPressTriggeredRef.current) {
+      fabLongPressTriggeredRef.current = false;
+      return;
+    }
+    setMobileFabOpen((prev) => !prev);
+  };
+
+  useEffect(() => {
+    return () => {
+      clearFabLongPressTimer();
+      clearPanelLongPressTimer();
+      clearDragTimer();
+    };
+  }, []);
+
   const handleShare = async () => {
+    if (onShareBoard) {
+      try {
+        const shared = await onShareBoard();
+        if (shared) {
+          return;
+        }
+      } catch (e) {
+        console.warn("Native board share failed:", e);
+      }
+    }
     const url = buildRoomInviteUrl();
     if (!url || !isValidRoomInviteUrl(url)) {
       flashRefreshError();
@@ -239,6 +408,85 @@ export default function StudioConsole({
     }
   };
 
+  const toolbarContent = (
+    <>
+      <div className={innerGroup}>
+        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title="Карандаш" aria-hidden>
+          <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} />
+        </span>
+        <div className="grid grid-cols-3 grid-rows-2 gap-0.5" role="group" aria-label="Цвет карандаша">
+          {PENCIL_SWATCHES.map((sw) => {
+            const selected = isPencilActive && pencilColor === sw.color;
+            return (
+              <button
+                key={sw.key}
+                type="button"
+                onClick={() => onPaletteColor(sw.color)}
+                className={`h-2 w-2 border-0 p-0 transition ${selected ? "ring-1 ring-inset ring-zinc-800 ring-offset-0" : "ring-0 hover:opacity-90"} rounded-sm`}
+                style={{ backgroundColor: sw.color }}
+                title={`Карандаш: ${sw.key}`}
+                aria-label={`Карандаш, цвет ${sw.key}`}
+                aria-pressed={selected}
+              />
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          onClick={onEraser}
+          className={`${toolButtonBase} ml-0.5 h-6 w-6 ${isEraserActive ? toolButtonActive : toolButtonInactive}`}
+          title="Ластик"
+          aria-pressed={isEraserActive}
+          aria-label="Ластик"
+        >
+          <Eraser className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+        </button>
+      </div>
+
+      <div className={`${innerGroup} flex-col !h-auto py-1`} role="group" aria-label="Толщина линии">
+        {[1, 3, 5].map((w) => (
+          <button
+            key={w}
+            type="button"
+            onClick={() => onPencilWidthChange(w as 1 | 3 | 5)}
+            className={`flex h-2.5 w-8 items-center justify-center rounded ${pencilWidth === w ? "bg-zinc-200" : "hover:bg-zinc-100"}`}
+            title={`Толщина ${w}px`}
+            aria-pressed={pencilWidth === w}
+            aria-label={`Толщина линии ${w} пиксель${w > 1 ? "я" : ""}`}
+          >
+            <span className="block w-5 rounded-full bg-zinc-900" style={{ height: `${w}px` }} />
+          </button>
+        ))}
+      </div>
+
+      <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <PopoverTrigger asChild>
+          <button type="button" className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`} title="Настройки кисти" aria-label="Настройки кисти">
+            <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-60">
+          <div className="space-y-3">
+            <div>
+              <p className="mb-1 text-xs font-medium text-zinc-700">Толщина (shadcn Slider)</p>
+              <Slider
+                value={[pencilWidth]}
+                min={1}
+                max={5}
+                step={2}
+                onValueChange={(v) => onPencilWidthChange((v[0] === 1 || v[0] === 5 ? v[0] : 3) as 1 | 3 | 5)}
+              />
+            </div>
+            <div>
+              <p className="mb-1 text-xs font-medium text-zinc-700">Цвет (shadcn ColorPicker)</p>
+              <ColorPicker color={pencilColor} onChange={onPaletteColor} />
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </>
+  );
+
   return (
     <>
       <div
@@ -247,7 +495,14 @@ export default function StudioConsole({
         aria-label={`Пользователей в сети: ${collabParticipants} из ${maxRoomParticipants}`}
       >
         <div
-          className="pointer-events-auto flex items-center gap-2 rounded-full border border-zinc-200/70 bg-white/90 px-2.5 py-1 text-xs font-medium tabular-nums text-zinc-600 shadow-sm backdrop-blur"
+          className={cn(
+            "pointer-events-auto flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums shadow-sm backdrop-blur",
+            dark
+              ? "border-zinc-600/80 bg-zinc-900/90 text-zinc-200"
+              : ivory
+                ? "border-stone-300/80 bg-[#f0ebe0]/95 text-stone-700"
+                : "border-zinc-200/70 bg-white/90 text-zinc-600",
+          )}
           title="Участники в комнате"
         >
           <span
@@ -256,23 +511,237 @@ export default function StudioConsole({
           />
           <span>
             {collabParticipants}
-            <span className="text-zinc-400">/</span>
+            <span className={dark ? "text-zinc-500" : ivory ? "text-stone-400" : "text-zinc-400"}>
+              /
+            </span>
             {maxRoomParticipants}
           </span>
         </div>
       </div>
 
+      <div className="fixed inset-x-0 top-0 z-[70] flex items-start justify-between px-2.5 pt-2 sm:hidden">
+        <div className="flex max-w-[min(100vw-1rem,28rem)] flex-wrap items-center gap-1.5">
+          <Link
+            href="/"
+            className={cn(myBoardChipClass(), "min-h-9 shrink-0 px-2 text-xs")}
+            title="MyBoard"
+            aria-current={isHome ? "page" : undefined}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.button !== 0) {
+                return;
+              }
+              e.preventDefault();
+              if (myBoardLongConsumedRef.current) {
+                myBoardLongConsumedRef.current = false;
+                return;
+              }
+              onMyBoardInvert();
+            }}
+            onPointerDown={() => {
+              clearMyBoardLongTimer();
+              myBoardLongConsumedRef.current = false;
+              myBoardLongTimerRef.current = window.setTimeout(() => {
+                myBoardLongConsumedRef.current = true;
+                onMyBoardComfort();
+              }, 650);
+            }}
+            onPointerUp={clearMyBoardLongTimer}
+            onPointerLeave={clearMyBoardLongTimer}
+            onPointerCancel={clearMyBoardLongTimer}
+          >
+            MyBoard
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              void onNewDocument?.();
+            }}
+            className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+            title="Новая работа"
+            aria-label="Новая работа"
+          >
+            <Plus className="h-5 w-5" strokeWidth={ICON} aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleShare()}
+            className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+            title="Поделиться"
+            aria-label="Поделиться ссылкой"
+          >
+            <Share2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={openLibrary}
+            className={`${navLinkClass(isLibrary)} h-9 w-9 gap-0 p-0 shadow-md`}
+            title="Библиотека работ"
+            aria-label="Библиотека работ"
+          >
+            <Library className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+          </button>
+          <Popover open={mobileRoomOpen} onOpenChange={setMobileRoomOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+                title="Номер комнаты"
+                aria-label="Показать номер комнаты"
+              >
+                <span className="relative inline-flex h-6 w-6 items-center justify-center" aria-hidden>
+                  <DoorOpen className="h-4 w-4" strokeWidth={ICON} />
+                  <span className="absolute bottom-0 right-0 text-[9px] font-black leading-none">N</span>
+                </span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-[min(20rem,92vw)]">
+              <p className="text-xs font-medium text-zinc-500">Комната</p>
+              <p className="mt-1 break-all font-mono text-sm text-zinc-900">{collabRoomId}</p>
+              {roomFull ? (
+                <p className="mt-2 text-xs font-medium text-amber-700">
+                  Комната заполнена (макс. {maxRoomParticipants})
+                </p>
+              ) : null}
+              <button
+                type="button"
+                className="mt-3 w-full rounded-md border border-zinc-300 bg-zinc-50 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-100"
+                onClick={async () => {
+                  const url = buildRoomInviteUrl();
+                  if (!url) {
+                    return;
+                  }
+                  try {
+                    await navigator.clipboard.writeText(url);
+                  } catch {
+                    flashRefreshError();
+                  }
+                }}
+              >
+                Копировать ссылку-приглашение
+              </button>
+            </PopoverContent>
+          </Popover>
+          <button
+            type="button"
+            disabled={!canUndo}
+            onClick={() => onUndo()}
+            className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
+            title="Отменить (до 5 шагов)"
+            aria-label="Отменить последнее действие"
+          >
+            <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+          </button>
+          <Link
+            href="/privacy"
+            className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+            title="Политика конфиденциальности"
+            aria-label="Политика конфиденциальности"
+          >
+            <CircleAlert className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+          </Link>
+        </div>
+      </div>
+
+      <div
+        className="fixed z-[90] sm:hidden"
+        style={{ right: `${mobileDockPos.x}px`, bottom: `${mobileDockPos.y}px` }}
+      >
+        {mobileFabOpen ? (
+          <div
+            className={`${floatingToolbar} mb-2 max-w-[86vw] flex-col items-start`}
+            onPointerDown={(e) => {
+              if (e.target === e.currentTarget) {
+                clearPanelLongPressTimer();
+                panelLongPressTimerRef.current = window.setTimeout(() => {
+                  setMobileFabPinned(false);
+                  setMobileFabOpen(false);
+                }, 550);
+              }
+            }}
+            onPointerUp={clearPanelLongPressTimer}
+            onPointerCancel={clearPanelLongPressTimer}
+            onPointerDownCapture={startDragHold}
+            onPointerMove={moveDragHold}
+            onPointerUpCapture={endDragHold}
+            onPointerCancelCapture={endDragHold}
+          >
+            <div className="flex w-full flex-wrap items-center gap-1.5" role="toolbar" aria-label="Мобильные инструменты">
+              {toolbarContent}
+              <button type="button" onClick={onAddText} className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}><Type className="h-4 w-4" strokeWidth={ICON} /></button>
+              <button type="button" onClick={onAddImage} className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}><ImageIcon className="h-4 w-4" strokeWidth={ICON} /></button>
+              <button
+                type="button"
+                disabled={!canUndo}
+                onClick={() => onUndo()}
+                className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive} disabled:cursor-not-allowed disabled:opacity-40`}
+                title="Отменить"
+                aria-label="Отменить последнее действие"
+              >
+                <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
+              <button type="button" onClick={handleMainSaveClick} className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}><Save className="h-4 w-4" strokeWidth={ICON} /></button>
+            </div>
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onPointerDown={startFabLongPress}
+          onPointerUp={clearFabLongPressTimer}
+          onPointerCancel={clearFabLongPressTimer}
+          onPointerDownCapture={startDragHold}
+          onPointerMove={moveDragHold}
+          onPointerUpCapture={endDragHold}
+          onPointerCancelCapture={endDragHold}
+          onClick={toggleFab}
+          className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-zinc-900 text-white shadow-xl"
+          aria-label={mobileFabOpen ? "Свернуть инструменты" : "Открыть инструменты"}
+          title={mobileFabPinned ? "Панель закреплена" : "Открыть инструменты (долгое нажатие закрепляет)"}
+        >
+          {mobileFabOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+      </div>
+
       <header
-        className="fixed inset-x-0 top-0 z-[70] bg-zinc-100/90 backdrop-blur"
+        className={cn(
+          "fixed inset-x-0 top-0 z-[70] hidden backdrop-blur sm:block",
+          ivory ? "border-b border-stone-200/80 bg-[#ebe6d8]/95" : dark ? "border-b border-zinc-800 bg-zinc-900/90" : "bg-zinc-100/90",
+        )}
         aria-label="Панель навигации и инструментов"
       >
-        <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-start gap-2 overflow-visible px-2.5 pb-0 pt-2">
+        <div
+          className={cn(
+            "mx-auto flex w-full flex-wrap items-start gap-2 overflow-visible px-2.5 pb-0 pt-2",
+            boardOuterMaxClass,
+          )}
+        >
           <div className="flex shrink-0 flex-wrap items-center gap-1.5">
             <Link
               href="/"
-              className={`${navLinkClass(isHome)} h-9 min-w-9 shadow-md`}
-              title="Доска"
+              className={cn(myBoardChipClass(), isHome && "ring-2 ring-zinc-400 ring-offset-2 ring-offset-transparent")}
+              title="MyBoard: нажать — инверсия; долгое — режим для глаз"
               aria-current={isHome ? "page" : undefined}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.button !== 0) {
+                  return;
+                }
+                e.preventDefault();
+                if (myBoardLongConsumedRef.current) {
+                  myBoardLongConsumedRef.current = false;
+                  return;
+                }
+                onMyBoardInvert();
+              }}
+              onPointerDown={() => {
+                clearMyBoardLongTimer();
+                myBoardLongConsumedRef.current = false;
+                myBoardLongTimerRef.current = window.setTimeout(() => {
+                  myBoardLongConsumedRef.current = true;
+                  onMyBoardComfort();
+                }, 650);
+              }}
+              onPointerUp={clearMyBoardLongTimer}
+              onPointerLeave={clearMyBoardLongTimer}
+              onPointerCancel={clearMyBoardLongTimer}
             >
               MyBoard
             </Link>
@@ -306,9 +775,73 @@ export default function StudioConsole({
             >
               <Library className="h-4 w-4" strokeWidth={ICON} aria-hidden />
             </button>
+            <Popover open={desktopRoomOpen} onOpenChange={setDesktopRoomOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+                  title="Номер комнаты"
+                  aria-label="Показать номер комнаты"
+                >
+                  <span className="relative inline-flex h-6 w-6 items-center justify-center" aria-hidden>
+                    <DoorOpen className="h-4 w-4" strokeWidth={ICON} />
+                    <span className="absolute bottom-0 right-0 text-[9px] font-black leading-none">N</span>
+                  </span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[min(20rem,92vw)]">
+                <p className="text-xs font-medium text-zinc-500">Комната</p>
+                <p className="mt-1 break-all font-mono text-sm text-zinc-900">{collabRoomId}</p>
+                {roomFull ? (
+                  <p className="mt-2 text-xs font-medium text-amber-700">
+                    Комната заполнена (макс. {maxRoomParticipants})
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  className="mt-3 w-full rounded-md border border-zinc-300 bg-zinc-50 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-100"
+                  onClick={async () => {
+                    const url = buildRoomInviteUrl();
+                    if (!url) {
+                      return;
+                    }
+                    try {
+                      await navigator.clipboard.writeText(url);
+                    } catch {
+                      flashRefreshError();
+                    }
+                  }}
+                >
+                  Копировать ссылку-приглашение
+                </button>
+              </PopoverContent>
+            </Popover>
+            <button
+              type="button"
+              disabled={!canUndo}
+              onClick={() => onUndo()}
+              className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
+              title="Отменить (до 5 шагов)"
+              aria-label="Отменить последнее действие"
+            >
+              <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+            </button>
+            <Link
+              href="/privacy"
+              className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+              title="Политика конфиденциальности"
+              aria-label="Политика конфиденциальности"
+            >
+              <CircleAlert className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+            </Link>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center sm:justify-end">
+          <div
+            className={cn(
+              "flex min-w-0 flex-1 flex-wrap items-center justify-center sm:justify-end",
+              boardToolbarMaxClass,
+            )}
+          >
             <div className={floatingToolbar} role="toolbar" aria-label="Инструменты">
             <div className={innerGroup}>
               <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title="Карандаш" aria-hidden>
@@ -505,47 +1038,8 @@ export default function StudioConsole({
               <Download className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
               <span>PNG</span>
             </button>
-
-            {isHome ? (
-              <button
-                type="button"
-                onClick={() => requestSavedListRefresh()}
-                aria-busy={isProcessing}
-                className={`${toolButtonBase} h-8 w-8 rounded-md transition-colors duration-200 ${
-                  refreshErrorFlash ? "text-red-500" : "text-zinc-800"
-                } ${toolButtonInactive}`}
-                title="Статус синхронизации и обновление списка работ"
-                aria-label="Статус фоновых операций и обновить список сохранённых работ"
-              >
-                <RefreshCw
-                  className={`h-3.5 w-3.5 ${isProcessing ? "animate-spin" : ""}`}
-                  strokeWidth={ICON}
-                  aria-hidden
-                />
-              </button>
-            ) : null}
             </div>
           </div>
-        </div>
-
-        <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-center gap-2 border-t border-zinc-200/60 px-2.5 py-1.5 text-[11px] text-zinc-600">
-          <span>
-            Комната: <span className="font-mono text-zinc-800">{collabRoomId.slice(0, 8)}…</span>
-          </span>
-          {roomFull ? (
-            <span className="font-medium text-amber-700">
-              · Комната заполнена (макс. {maxRoomParticipants})
-            </span>
-          ) : null}
-          <span className="text-zinc-300">·</span>
-          <Link
-            href="/privacy"
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-900"
-            title="Политика конфиденциальности"
-            aria-label="Политика конфиденциальности"
-          >
-            <CircleAlert className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-          </Link>
         </div>
       </header>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useState } from "react";
-import { FolderOpen, Loader2, RefreshCw, Trash2, X } from "lucide-react";
+import { FolderOpen, Loader2, RefreshCw, Share2, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type DrawingRow, listDrawings } from "../utils/drawingsApi";
 import { supabase } from "../utils/supabaseClient";
@@ -52,6 +52,27 @@ export default function LibraryModal() {
   const openOnBoard = (id: string) => {
     close();
     router.push(`/?id=${encodeURIComponent(id)}`);
+  };
+
+  const shareDrawingLink = async (id: string) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const url = `${origin}/?id=${encodeURIComponent(id)}`;
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({ title: "MyBoard", text: "Ссылка на работу", url });
+        return;
+      }
+    } catch (e) {
+      const name = e instanceof DOMException ? e.name : (e as Error)?.name;
+      if (name === "AbortError") {
+        return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      window.prompt("Ссылка на работу", url);
+    }
   };
 
   const onDelete = async (row: DrawingRow) => {
@@ -152,9 +173,24 @@ export default function LibraryModal() {
                 return (
                   <li
                     key={row.id}
-                    className="group flex min-h-[7.5rem] flex-col rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+                    className="group flex min-h-[7.5rem] flex-col rounded-xl border border-gray-100 bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
                     title={row.id}
                   >
+                    <div className="mb-2 h-28 w-full overflow-hidden rounded-lg bg-gray-100">
+                      {row.preview_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={row.preview_url}
+                          alt={row.name || "Превью работы"}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+                          Нет превью
+                        </div>
+                      )}
+                    </div>
                     <h3 className="line-clamp-2 min-h-0 text-sm font-bold leading-snug text-gray-900">
                       {row.name || "Без названия"}
                     </h3>
@@ -177,6 +213,16 @@ export default function LibraryModal() {
                           disabled={busy}
                         >
                           <FolderOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void shareDrawingLink(row.id)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+                          title="Поделиться ссылкой"
+                          aria-label={`Поделиться ссылкой на «${row.name}»`}
+                          disabled={busy}
+                        >
+                          <Share2 className="h-4 w-4" strokeWidth={1.75} aria-hidden />
                         </button>
                         <button
                           type="button"
