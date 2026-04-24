@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent, RefObject } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -11,6 +11,7 @@ import {
   Eraser,
   FolderOpen,
   Image as ImageIcon,
+  List,
   Loader2,
   Menu,
   Pencil,
@@ -176,6 +177,33 @@ export default function StudioConsole({
           : "border-zinc-800 bg-zinc-900 text-white hover:bg-zinc-800",
     );
 
+  /** Участники в комнате — в одной строке с MyBoard (справа), высота как у кнопки MyBoard. */
+  const participantStatusPill = (
+    <div
+      className={cn(
+        "inline-flex h-9 shrink-0 items-center gap-2 rounded-full border px-3 text-xs font-medium tabular-nums shadow-md",
+        dark
+          ? "border-zinc-600/80 bg-zinc-900/95 text-zinc-200"
+          : ivory
+            ? "border-stone-300/80 bg-[#f0ebe0]/95 text-stone-700"
+            : "border-zinc-200/80 bg-white text-zinc-600",
+      )}
+      role="status"
+      aria-label={`Пользователей в сети: ${collabParticipants} из ${maxRoomParticipants}`}
+      title="Участники в комнате"
+    >
+      <span
+        className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_0_1px_rgba(0,0,0,0.04)]"
+        aria-hidden
+      />
+      <span>
+        {collabParticipants}
+        <span className={dark ? "text-zinc-500" : ivory ? "text-stone-400" : "text-zinc-400"}>/</span>
+        {maxRoomParticipants}
+      </span>
+    </div>
+  );
+
   const myBoardLongTimerRef = useRef<number | null>(null);
   const myBoardLongConsumedRef = useRef(false);
 
@@ -194,9 +222,37 @@ export default function StudioConsole({
 
   const isPencilActive = activeTool === "pencil" && !isImageDeleteMode;
   const isEraserActive = activeTool === "eraser" && !isImageDeleteMode;
+
+  /** Три горизонтальные полоски слева от карандаша: сверху 1px, середина 3px, снизу 5px. Высота блока = h-6 (как у иконки карандаша). */
+  const pencilWidthStripeControl = (
+    <div
+      className="mr-0.5 flex h-6 w-3 shrink-0 flex-col gap-px"
+      role="group"
+      aria-label="Толщина карандаша"
+    >
+      {([1, 3, 5] as const).map((w) => (
+        <button
+          key={w}
+          type="button"
+          onClick={() => onPencilWidthChange(w)}
+          className={cn(
+            "flex min-h-0 flex-1 w-full items-center justify-center rounded-sm border-0 p-0 transition outline-none",
+            pencilWidth === w ? "bg-zinc-200 ring-1 ring-inset ring-zinc-400/50" : "hover:bg-zinc-100",
+          )}
+          title={`Толщина ${w} px`}
+          aria-pressed={pencilWidth === w}
+          aria-label={`Толщина линии ${w} px`}
+        >
+          <span className="block h-px w-full max-w-[11px] rounded-full bg-zinc-900" aria-hidden />
+        </button>
+      ))}
+    </div>
+  );
+
   const [saveNameOpen, setSaveNameOpen] = useState(false);
   const [workName, setWorkName] = useState(defaultWorkName);
   const popoverId = useId();
+  const sharePanelTitleId = useId();
   const saveGroupRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -264,11 +320,13 @@ export default function StudioConsole({
   };
 
   const [refreshErrorFlash, setRefreshErrorFlash] = useState(false);
-  const [mobileRoomOpen, setMobileRoomOpen] = useState(false);
-  const [desktopRoomOpen, setDesktopRoomOpen] = useState(false);
+  const [sharePanelOpen, setSharePanelOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportWrapRef = useRef<HTMLDivElement | null>(null);
   const exportLeaveTimerRef = useRef<number | null>(null);
+  const [navMoreOpen, setNavMoreOpen] = useState(false);
+  const [navMorePos, setNavMorePos] = useState<{ top: number; left: number } | null>(null);
+  const navMoreAnchorRef = useRef<HTMLElement | null>(null);
   const [mobileFabOpen, setMobileFabOpen] = useState(false);
   const [mobileFabPinned, setMobileFabPinned] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -386,6 +444,85 @@ export default function StudioConsole({
     }, 240);
   };
 
+  const NAV_MORE_MENU_W = 232;
+
+  const layoutNavMore = useCallback(() => {
+    const el = navMoreAnchorRef.current;
+    if (!el || typeof window === "undefined") {
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - NAV_MORE_MENU_W - 8));
+    setNavMorePos({ top: r.bottom + 6, left });
+  }, []);
+
+  const closeNavMore = useCallback(() => {
+    setNavMoreOpen(false);
+    setNavMorePos(null);
+    navMoreAnchorRef.current = null;
+    setExportMenuOpen(false);
+    setSaveNameOpen(false);
+  }, []);
+
+  const toggleNavMore = useCallback(
+    (anchor: HTMLElement) => {
+      if (navMoreOpen && navMoreAnchorRef.current === anchor) {
+        closeNavMore();
+        return;
+      }
+      navMoreAnchorRef.current = anchor;
+      setNavMoreOpen(true);
+    },
+    [navMoreOpen, closeNavMore],
+  );
+
+  useLayoutEffect(() => {
+    if (!navMoreOpen) {
+      setNavMorePos(null);
+      return;
+    }
+    layoutNavMore();
+    const onScrollOrResize = () => layoutNavMore();
+    window.addEventListener("resize", onScrollOrResize);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    return () => {
+      window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+    };
+  }, [navMoreOpen, layoutNavMore]);
+
+  useEffect(() => {
+    if (!navMoreOpen || typeof document === "undefined") {
+      return;
+    }
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      const menuEl = document.getElementById("nav-console-more-menu");
+      if (menuEl?.contains(t)) {
+        return;
+      }
+      if (navMoreAnchorRef.current?.contains(t)) {
+        return;
+      }
+      closeNavMore();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [navMoreOpen, closeNavMore]);
+
+  useEffect(() => {
+    if (!navMoreOpen) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeNavMore();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [navMoreOpen, closeNavMore]);
+
   useEffect(() => {
     return () => {
       clearFabLongPressTimer();
@@ -409,12 +546,52 @@ export default function StudioConsole({
     return () => document.removeEventListener("pointerdown", onDocPointer, true);
   }, [exportMenuOpen]);
 
-  const handleShare = async () => {
+  useEffect(() => {
+    if (!sharePanelOpen) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSharePanelOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sharePanelOpen]);
+
+  const copyRoomIdToClipboard = async () => {
+    const id = collabRoomId?.trim();
+    if (!id) {
+      flashRefreshError();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(id);
+    } catch {
+      flashRefreshError();
+    }
+  };
+
+  const copyInviteUrlToClipboard = async () => {
+    const url = buildRoomInviteUrl();
+    if (!url || !isValidRoomInviteUrl(url)) {
+      flashRefreshError();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      flashRefreshError();
+    }
+  };
+
+  /** Системное меню «Поделиться» (файл доски + текст), если доступно. */
+  const runSystemShare = async () => {
     if (onShareBoard) {
       try {
         const shared = await onShareBoard();
         if (shared) {
-          return;
+          return true;
         }
       } catch (e) {
         console.warn("Native board share failed:", e);
@@ -423,7 +600,7 @@ export default function StudioConsole({
     const url = buildRoomInviteUrl();
     if (!url || !isValidRoomInviteUrl(url)) {
       flashRefreshError();
-      return;
+      return false;
     }
     const text = `Присоединяйся к моей работе в MyBoard! Ссылка: ${url}`;
     if (typeof navigator !== "undefined" && navigator.share) {
@@ -433,24 +610,27 @@ export default function StudioConsole({
           text,
           url,
         });
-        return;
+        return true;
       } catch (e) {
         const name = e instanceof DOMException ? e.name : (e as Error)?.name;
         if (name === "AbortError") {
-          return;
+          return true;
         }
       }
     }
     try {
       await navigator.clipboard.writeText(text);
+      return true;
     } catch {
       flashRefreshError();
+      return false;
     }
   };
 
   const toolbarContent = (
     <>
       <div className={innerGroup}>
+        {pencilWidthStripeControl}
         <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title="Карандаш" aria-hidden>
           <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} />
         </span>
@@ -483,22 +663,6 @@ export default function StudioConsole({
         </button>
       </div>
 
-      <div className={`${innerGroup} flex-col !h-auto py-1`} role="group" aria-label="Толщина линии">
-        {[1, 3, 5].map((w) => (
-          <button
-            key={w}
-            type="button"
-            onClick={() => onPencilWidthChange(w as 1 | 3 | 5)}
-            className={`flex h-2.5 w-8 items-center justify-center rounded ${pencilWidth === w ? "bg-zinc-200" : "hover:bg-zinc-100"}`}
-            title={`Толщина ${w}px`}
-            aria-pressed={pencilWidth === w}
-            aria-label={`Толщина линии ${w} пиксель${w > 1 ? "я" : ""}`}
-          >
-            <span className="block w-5 rounded-full bg-zinc-900" style={{ height: `${w}px` }} />
-          </button>
-        ))}
-      </div>
-
       <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
         <PopoverTrigger asChild>
           <button type="button" className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`} title="Настройки кисти" aria-label="Настройки кисти">
@@ -529,37 +693,7 @@ export default function StudioConsole({
 
   return (
     <>
-      <div
-        className="pointer-events-none fixed right-2 top-2 z-[75] sm:right-3 sm:top-3"
-        role="status"
-        aria-label={`Пользователей в сети: ${collabParticipants} из ${maxRoomParticipants}`}
-      >
-        <div
-          className={cn(
-            "pointer-events-auto flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums shadow-sm backdrop-blur",
-            dark
-              ? "border-zinc-600/80 bg-zinc-900/90 text-zinc-200"
-              : ivory
-                ? "border-stone-300/80 bg-[#f0ebe0]/95 text-stone-700"
-                : "border-zinc-200/70 bg-white/90 text-zinc-600",
-          )}
-          title="Участники в комнате"
-        >
-          <span
-            className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_0_1px_rgba(0,0,0,0.04)]"
-            aria-hidden
-          />
-          <span>
-            {collabParticipants}
-            <span className={dark ? "text-zinc-500" : ivory ? "text-stone-400" : "text-zinc-400"}>
-              /
-            </span>
-            {maxRoomParticipants}
-          </span>
-        </div>
-      </div>
-
-      <div className="fixed inset-x-0 top-0 z-[70] flex items-start justify-between px-2.5 pt-2 sm:hidden">
+      <div className="fixed inset-x-0 top-0 z-[70] flex items-center justify-between gap-2 px-2.5 pt-2 sm:hidden">
         <div className="flex max-w-[min(100vw-1rem,28rem)] flex-wrap items-center gap-1.5">
           <Link
             href="/"
@@ -604,12 +738,14 @@ export default function StudioConsole({
           </button>
           <button
             type="button"
-            onClick={() => void handleShare()}
+            onClick={(e) => toggleNavMore(e.currentTarget)}
             className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-            title="Поделиться"
-            aria-label="Поделиться ссылкой"
+            title="Ещё: поделиться, политика, сохранить, скачать"
+            aria-label="Ещё: поделиться, политика, сохранить, скачать"
+            aria-expanded={navMoreOpen}
+            aria-haspopup="menu"
           >
-            <Share2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+            <List className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
           <button
             type="button"
@@ -620,46 +756,6 @@ export default function StudioConsole({
           >
             <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
-          <Popover open={mobileRoomOpen} onOpenChange={setMobileRoomOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-                title="Номер комнаты"
-                aria-label="Показать номер комнаты"
-              >
-                <span className="select-none text-[17px] font-black leading-none tracking-tight" aria-hidden>
-                  N
-                </span>
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-[min(20rem,92vw)]">
-              <p className="text-xs font-medium text-zinc-500">Комната</p>
-              <p className="mt-1 break-all font-mono text-sm text-zinc-900">{collabRoomId}</p>
-              {roomFull ? (
-                <p className="mt-2 text-xs font-medium text-amber-700">
-                  Комната заполнена (макс. {maxRoomParticipants})
-                </p>
-              ) : null}
-              <button
-                type="button"
-                className="mt-3 w-full rounded-md border border-zinc-300 bg-zinc-50 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-100"
-                onClick={async () => {
-                  const url = buildRoomInviteUrl();
-                  if (!url) {
-                    return;
-                  }
-                  try {
-                    await navigator.clipboard.writeText(url);
-                  } catch {
-                    flashRefreshError();
-                  }
-                }}
-              >
-                Копировать ссылку-приглашение
-              </button>
-            </PopoverContent>
-          </Popover>
           <button
             type="button"
             disabled={!canUndo}
@@ -670,15 +766,8 @@ export default function StudioConsole({
           >
             <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
-          <Link
-            href="/privacy"
-            className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-            title="Политика конфиденциальности"
-            aria-label="Политика конфиденциальности"
-          >
-            <CircleAlert className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-          </Link>
         </div>
+        {participantStatusPill}
       </div>
 
       <div
@@ -718,7 +807,6 @@ export default function StudioConsole({
               >
                 <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
               </button>
-              <button type="button" onClick={handleMainSaveClick} className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}><Save className="h-4 w-4" strokeWidth={ICON} /></button>
             </div>
           </div>
         ) : null}
@@ -749,14 +837,15 @@ export default function StudioConsole({
       >
         <div
           className={cn(
-            "mx-auto flex w-full flex-wrap items-start gap-2 overflow-visible px-2.5 pb-0 pt-2",
+            "mx-auto flex w-full flex-col gap-2 overflow-visible px-2.5 pb-0 pt-2",
             boardOuterMaxClass,
           )}
         >
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-            <Link
-              href="/"
-              className={cn(myBoardChipClass(), isHome && "ring-2 ring-zinc-400 ring-offset-2 ring-offset-transparent")}
+          <div className="flex w-full min-w-0 items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              <Link
+                href="/"
+                className={cn(myBoardChipClass(), isHome && "ring-2 ring-zinc-400 ring-offset-2 ring-offset-transparent")}
               title="MyBoard: нажать — инверсия; долгое — режим для глаз"
               aria-current={isHome ? "page" : undefined}
               onClick={(e) => {
@@ -797,12 +886,14 @@ export default function StudioConsole({
             </button>
             <button
               type="button"
-              onClick={() => void handleShare()}
+              onClick={(e) => toggleNavMore(e.currentTarget)}
               className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-              title="Поделиться"
-              aria-label="Поделиться ссылкой"
+              title="Ещё: поделиться, политика, сохранить, скачать"
+              aria-label="Ещё: поделиться, политика, сохранить, скачать"
+              aria-expanded={navMoreOpen}
+              aria-haspopup="menu"
             >
-              <Share2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              <List className="h-4 w-4" strokeWidth={ICON} aria-hidden />
             </button>
             <button
               type="button"
@@ -814,46 +905,6 @@ export default function StudioConsole({
             >
               <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
             </button>
-            <Popover open={desktopRoomOpen} onOpenChange={setDesktopRoomOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-                  title="Номер комнаты"
-                  aria-label="Показать номер комнаты"
-                >
-                  <span className="select-none text-[17px] font-black leading-none tracking-tight" aria-hidden>
-                    N
-                  </span>
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-[min(20rem,92vw)]">
-                <p className="text-xs font-medium text-zinc-500">Комната</p>
-                <p className="mt-1 break-all font-mono text-sm text-zinc-900">{collabRoomId}</p>
-                {roomFull ? (
-                  <p className="mt-2 text-xs font-medium text-amber-700">
-                    Комната заполнена (макс. {maxRoomParticipants})
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  className="mt-3 w-full rounded-md border border-zinc-300 bg-zinc-50 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-100"
-                  onClick={async () => {
-                    const url = buildRoomInviteUrl();
-                    if (!url) {
-                      return;
-                    }
-                    try {
-                      await navigator.clipboard.writeText(url);
-                    } catch {
-                      flashRefreshError();
-                    }
-                  }}
-                >
-                  Копировать ссылку-приглашение
-                </button>
-              </PopoverContent>
-            </Popover>
             <button
               type="button"
               disabled={!canUndo}
@@ -864,24 +915,19 @@ export default function StudioConsole({
             >
               <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
             </button>
-            <Link
-              href="/privacy"
-              className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-              title="Политика конфиденциальности"
-              aria-label="Политика конфиденциальности"
-            >
-              <CircleAlert className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-            </Link>
+            </div>
+            {participantStatusPill}
           </div>
 
           <div
             className={cn(
-              "flex min-w-0 flex-1 flex-wrap items-center justify-center sm:justify-end",
+              "flex w-full min-w-0 flex-wrap items-center justify-center sm:justify-end",
               boardToolbarMaxClass,
             )}
           >
             <div className={floatingToolbar} role="toolbar" aria-label="Инструменты">
             <div className={innerGroup}>
+              {pencilWidthStripeControl}
               <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title="Карандаш" aria-hidden>
                 <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} />
               </span>
@@ -1001,18 +1047,57 @@ export default function StudioConsole({
                 <Trash2 className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
               </button>
             </div>
+            </div>
+          </div>
+        </div>
+      </header>
 
-            <div className="relative z-[1] min-h-8" ref={saveGroupRef}>
+      {navMoreOpen && navMorePos ? (
+        <div
+          id="nav-console-more-menu"
+          role="menu"
+          aria-label="Дополнительные действия"
+          className="fixed z-[96] max-h-[min(90vh,calc(100vh-4rem))] overflow-y-auto rounded-xl border border-zinc-200 bg-white py-1.5 shadow-xl"
+          style={{
+            top: navMorePos.top,
+            left: navMorePos.left,
+            width: NAV_MORE_MENU_W,
+          }}
+        >
+          <div className="flex flex-col gap-0.5 px-1.5">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeNavMore();
+                setSharePanelOpen(true);
+              }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
+            >
+              <Share2 className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
+              <span>Поделиться</span>
+            </button>
+            <Link
+              href="/privacy"
+              role="menuitem"
+              onClick={() => closeNavMore()}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-zinc-800 transition hover:bg-zinc-50"
+            >
+              <CircleAlert className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
+              <span>Политика конфиденциальности</span>
+            </Link>
+            <div className="my-1 h-px shrink-0 bg-zinc-200" aria-hidden />
+            <div className="relative w-full px-0.5" ref={saveGroupRef}>
               <button
                 type="button"
                 onClick={handleMainSaveClick}
                 disabled={isSavingToDrawings}
-                className={`${toolButtonBase} h-8 w-8 rounded-md ${
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition ${
                   isSavingToDrawings
                     ? "cursor-not-allowed opacity-50"
                     : saveNameOpen
-                      ? toolButtonActive
-                      : "hover:bg-gray-100"
+                      ? "bg-zinc-200 text-zinc-900"
+                      : "text-zinc-800 hover:bg-zinc-50"
                 }`}
                 title="Сохранить в базу"
                 aria-expanded={saveNameOpen}
@@ -1022,13 +1107,14 @@ export default function StudioConsole({
                 {isSavingToDrawings ? (
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={ICON} aria-hidden />
                 ) : (
-                  <Save className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+                  <Save className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
                 )}
+                <span>Сохранить в базу</span>
               </button>
               {saveNameOpen && !isSavingToDrawings ? (
                 <div
                   id={popoverId}
-                  className="absolute left-0 top-full z-[80] mt-1.5 w-[min(18rem,92vw)] rounded-md border border-zinc-200 bg-white p-2 shadow-lg"
+                  className="absolute left-0 right-0 top-full z-[80] mt-1.5 rounded-md border border-zinc-200 bg-white p-2 shadow-lg"
                   role="region"
                   aria-label="Название работы"
                   onKeyDown={(e) => {
@@ -1065,29 +1151,30 @@ export default function StudioConsole({
                 </div>
               ) : null}
             </div>
-
             <div
               ref={exportWrapRef}
-              className="relative shrink-0"
+              className="relative w-full px-0.5"
               onMouseEnter={openExportMenu}
               onMouseLeave={scheduleCloseExportMenu}
             >
               <button
                 type="button"
-                className="inline-flex h-8 min-h-8 w-full items-center justify-center gap-0.5 rounded-md px-2 text-sm font-medium text-zinc-900 transition hover:bg-gray-100"
+                className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
                 title="Скачать документ (PNG, JPG или PDF)"
                 aria-label="Скачать документ"
                 aria-expanded={exportMenuOpen}
                 aria-haspopup="menu"
                 onClick={() => setExportMenuOpen((o) => !o)}
               >
-                <Download className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
-                <span>PNG</span>
-                <ChevronDown className="h-3 w-3 opacity-60" strokeWidth={ICON} aria-hidden />
+                <span className="inline-flex items-center gap-2.5">
+                  <Download className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
+                  Скачать
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" strokeWidth={ICON} aria-hidden />
               </button>
               {exportMenuOpen ? (
                 <div
-                  className="absolute right-0 top-full z-[95] mt-1 min-w-[9.5rem] rounded-md border border-zinc-200 bg-white py-1 shadow-lg"
+                  className="absolute left-0 right-0 top-full z-[95] mt-1 rounded-md border border-zinc-200 bg-white py-1 shadow-lg"
                   role="menu"
                   aria-label="Формат файла"
                   onMouseEnter={openExportMenu}
@@ -1099,6 +1186,7 @@ export default function StudioConsole({
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
                     onClick={() => {
                       setExportMenuOpen(false);
+                      closeNavMore();
                       void Promise.resolve(onExportBoard("png"));
                     }}
                   >
@@ -1110,6 +1198,7 @@ export default function StudioConsole({
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
                     onClick={() => {
                       setExportMenuOpen(false);
+                      closeNavMore();
                       void Promise.resolve(onExportBoard("jpeg"));
                     }}
                   >
@@ -1121,6 +1210,7 @@ export default function StudioConsole({
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50"
                     onClick={() => {
                       setExportMenuOpen(false);
+                      closeNavMore();
                       void Promise.resolve(onExportBoard("pdf"));
                     }}
                   >
@@ -1129,10 +1219,104 @@ export default function StudioConsole({
                 </div>
               ) : null}
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {sharePanelOpen ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          role="presentation"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default bg-black/50 backdrop-blur-[2px]"
+            aria-label="Закрыть окно"
+            onClick={() => setSharePanelOpen(false)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={sharePanelTitleId}
+            className="relative z-[1] w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2 id={sharePanelTitleId} className="text-lg font-semibold text-zinc-900">
+                Поделиться
+              </h2>
+              <button
+                type="button"
+                onClick={() => setSharePanelOpen(false)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                title="Закрыть"
+                aria-label="Закрыть"
+              >
+                <X className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-zinc-500">
+              Скопируйте номер комнаты и ссылку-приглашение для коллег.
+            </p>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <p className="text-xs font-medium text-zinc-500">Номер комнаты</p>
+                <p className="mt-1 break-all font-mono text-sm text-zinc-900">{collabRoomId}</p>
+                <button
+                  type="button"
+                  onClick={() => void copyRoomIdToClipboard()}
+                  className="mt-2 w-full rounded-lg border border-zinc-300 bg-zinc-50 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-100"
+                >
+                  Копировать номер
+                </button>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-zinc-500">Ссылка-приглашение</p>
+                <p className="mt-1 max-h-24 overflow-y-auto break-all font-mono text-xs leading-relaxed text-zinc-700">
+                  {buildRoomInviteUrl() ?? "—"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void copyInviteUrlToClipboard()}
+                  disabled={!buildRoomInviteUrl()}
+                  className="mt-2 w-full rounded-lg border border-zinc-300 bg-zinc-50 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Копировать ссылку
+                </button>
+              </div>
+            </div>
+
+            {roomFull ? (
+              <p className="mt-3 text-xs font-medium text-amber-700">
+                Комната заполнена (макс. {maxRoomParticipants} участников).
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await runSystemShare();
+                  if (ok) {
+                    setSharePanelOpen(false);
+                  }
+                }}
+                className="inline-flex w-full items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 sm:w-auto"
+              >
+                Меню «Поделиться» устройства
+              </button>
+              <button
+                type="button"
+                onClick={() => setSharePanelOpen(false)}
+                className="inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 sm:w-auto"
+              >
+                Готово
+              </button>
             </div>
           </div>
         </div>
-      </header>
+      ) : null}
 
       <input
         ref={fileInputRef}
