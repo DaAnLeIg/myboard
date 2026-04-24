@@ -14,11 +14,13 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Share2,
   Trash2,
   Type,
 } from "lucide-react";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
 import { useSavedWorksRefresh } from "../contexts/SavedWorksRefreshContext";
+import { ROOM_PARAM } from "../hooks/useCollaboration";
 
 const ICON = 1.75 as const;
 
@@ -81,6 +83,7 @@ type StudioConsoleProps = {
   defaultWorkName: string;
   onExportPng: () => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onNewDocument?: () => void | Promise<void>;
 };
 
 export default function StudioConsole({
@@ -104,6 +107,7 @@ export default function StudioConsole({
   defaultWorkName,
   onExportPng,
   onFileChange,
+  onNewDocument,
 }: StudioConsoleProps) {
   const path = usePathname();
   const { isOpen: libraryOpen, open: openLibrary } = useLibraryModal();
@@ -154,6 +158,66 @@ export default function StudioConsole({
     void Promise.resolve(onSaveToDatabase(name));
   };
 
+  const buildRoomInviteUrl = (): string | null => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    const room = collabRoomId?.trim();
+    if (!room) {
+      return null;
+    }
+    const u = new URL(`${window.location.origin}${window.location.pathname}`);
+    u.searchParams.set(ROOM_PARAM, room);
+    const cur = new URL(window.location.href);
+    const docId = cur.searchParams.get("id") ?? cur.searchParams.get("drawing");
+    if (docId?.trim()) {
+      u.searchParams.set("id", docId.trim());
+    }
+    return u.toString();
+  };
+
+  const isValidRoomInviteUrl = (url: string): boolean => {
+    try {
+      const u = new URL(url);
+      const r = u.searchParams.get(ROOM_PARAM)?.trim();
+      return Boolean(r && r === collabRoomId.trim());
+    } catch {
+      return false;
+    }
+  };
+
+  const handleShare = async () => {
+    const url = buildRoomInviteUrl();
+    if (!url || !isValidRoomInviteUrl(url)) {
+      window.alert(
+        "Нельзя поделиться: в ссылке нет комнаты совместной работы. Обновите страницу и попробуйте снова.",
+      );
+      return;
+    }
+    const text = `Присоединяйся к моей работе в MyBoard! Ссылка: ${url}`;
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({
+          title: "MyBoard",
+          text,
+          url,
+        });
+        return;
+      } catch (e) {
+        const name = e instanceof DOMException ? e.name : (e as Error)?.name;
+        if (name === "AbortError") {
+          return;
+        }
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      window.alert("Ссылка скопирована!");
+    } catch {
+      window.alert("Не удалось скопировать ссылку.");
+    }
+  };
+
   return (
     <>
       <div
@@ -191,6 +255,26 @@ export default function StudioConsole({
             >
               MyBoard
             </Link>
+            <button
+              type="button"
+              onClick={() => {
+                void onNewDocument?.();
+              }}
+              className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+              title="Новая работа"
+              aria-label="Новая работа"
+            >
+              <Plus className="h-5 w-5" strokeWidth={ICON} aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleShare()}
+              className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+              title="Поделиться"
+              aria-label="Поделиться ссылкой"
+            >
+              <Share2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+            </button>
             <button
               type="button"
               onClick={openLibrary}

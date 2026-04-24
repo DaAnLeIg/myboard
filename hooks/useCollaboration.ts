@@ -14,7 +14,8 @@ import { STORAGE_PATH_KEY } from "../utils/imageStorage";
 const BROADCAST_ADD_OBJECT = "collab-object-add";
 const BROADCAST_REMOVE_OBJECT = "collab-object-remove";
 const BROADCAST_CURSOR = "collab-cursor";
-const ROOM_PARAM = "room";
+/** Параметр URL комнаты совместной работы (`?room=…`). */
+export const ROOM_PARAM = "room";
 export const MAX_ROOM_PARTICIPANTS = 10;
 const COLLAB_ID_KEY = "mbCollabId";
 

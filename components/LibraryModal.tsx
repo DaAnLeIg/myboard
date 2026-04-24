@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useState } from "react";
-import { DoorOpen, Loader2, RefreshCw, Trash2, X } from "lucide-react";
+import { FolderOpen, Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type DrawingRow, listDrawings } from "../utils/drawingsApi";
 import { supabase } from "../utils/supabaseClient";
@@ -122,14 +122,14 @@ export default function LibraryModal() {
         >
           <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
         </button>
-        <div className="shrink-0 border-b border-gray-100 px-5 pb-4 pr-32 pt-5 sm:pr-40">
+        <div className="shrink-0 border-b border-gray-100 px-5 pb-5 pr-32 pt-6 sm:pr-40">
           <h2
             id={titleId}
-            className="text-[15px] font-semibold tracking-[-0.01em] text-gray-900"
+            className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl"
           >
             Библиотека
           </h2>
-          <p className="mt-0.5 text-sm text-gray-500">Сохранённые работы</p>
+          <p className="mt-1 text-sm text-gray-500">Сохранённые работы</p>
         </div>
         <div className="absolute right-14 top-3 z-10">
           <button
@@ -150,20 +150,20 @@ export default function LibraryModal() {
           ) : rows.length === 0 ? (
             <p className="text-sm text-gray-500">Пока нет работ.</p>
           ) : (
-            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {rows.map((row) => {
                 const busy = deletingId === row.id;
                 return (
                   <li
                     key={row.id}
-                    className="group flex flex-col rounded-xl border border-gray-200/80 bg-white p-3.5 transition hover:border-gray-200 hover:shadow-sm"
+                    className="group flex min-h-[7.5rem] flex-col rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
                     title={row.id}
                   >
-                    <div className="min-w-0 flex-1">
-                      <h3 className="line-clamp-2 text-sm font-medium leading-snug text-gray-900">
-                        {row.name || "Без названия"}
-                      </h3>
-                      <p className="mt-1 text-xs text-gray-500">
+                    <h3 className="line-clamp-2 min-h-0 text-sm font-bold leading-snug text-gray-900">
+                      {row.name || "Без названия"}
+                    </h3>
+                    <div className="mt-auto w-full pt-4">
+                      <p className="text-xs leading-relaxed text-gray-500">
                         {row.created_at
                           ? new Date(row.created_at).toLocaleString("ru-RU", {
                               dateStyle: "medium",
@@ -171,32 +171,36 @@ export default function LibraryModal() {
                             })
                           : "—"}
                       </p>
-                    </div>
-                    <div className="mt-3 flex items-center justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => openOnBoard(row.id)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
-                        title="Открыть на холсте"
-                        aria-label={`Открыть «${row.name}» на холсте`}
-                        disabled={busy}
-                      >
-                        <DoorOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void onDelete(row)}
-                        disabled={busy}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition enabled:hover:text-red-500 enabled:hover:bg-red-50/80 disabled:cursor-not-allowed disabled:opacity-50"
-                        title="Удалить"
-                        aria-label={`Удалить «${row.name}»`}
-                      >
-                        {busy ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={1.75} aria-hidden />
-                        ) : (
-                          <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-                        )}
-                      </button>
+                      <div className="mt-2 flex justify-end gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => openOnBoard(row.id)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+                          title="Открыть на холсте"
+                          aria-label={`Открыть «${row.name}» на холсте`}
+                          disabled={busy}
+                        >
+                          <FolderOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void onDelete(row)}
+                          disabled={busy}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Удалить"
+                          aria-label={`Удалить «${row.name}»`}
+                        >
+                          {busy ? (
+                            <Loader2
+                              className="h-4 w-4 shrink-0 animate-spin text-gray-500"
+                              strokeWidth={1.75}
+                              aria-hidden
+                            />
+                          ) : (
+                            <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </li>
                 );

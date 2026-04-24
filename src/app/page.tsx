@@ -11,9 +11,7 @@ function HomeContent() {
 
   useEffect(() => {
     const id = searchParams.get("id") ?? searchParams.get("drawing");
-    if (id) {
-      setSelectedDrawingId(id);
-    }
+    setSelectedDrawingId(id ?? null);
   }, [searchParams]);
 
   return (

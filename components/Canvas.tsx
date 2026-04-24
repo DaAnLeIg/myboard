@@ -1,7 +1,7 @@
 "use client";
 
 import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import * as fabric from "fabric";
 import { supabase } from "../utils/supabaseClient";
 import {
@@ -205,6 +205,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     textCanvas.requestRenderAll();
   };
 
+  const router = useRouter();
   const searchParams = useSearchParams();
   const idFromUrl = searchParams.get("id") ?? searchParams.get("drawing");
   const drawingIdToLoad = selectedDrawingId ?? idFromUrl ?? null;
@@ -270,6 +271,54 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     },
     [],
   );
+
+  const handleNewDocument = useCallback(async () => {
+    if (
+      !window.confirm(
+        "Создать новый документ? Несохранённые изменения будут потеряны.",
+      )
+    ) {
+      return;
+    }
+    const imgCanvas = imgCanvasRef.current;
+    const textCanvas = textCanvasRef.current;
+    const drawCanvas = drawCanvasRef.current;
+    if (!imgCanvas || !textCanvas || !drawCanvas) {
+      return;
+    }
+    clearTextEditingVisuals();
+    isLoadingDrawingRef.current = true;
+    try {
+      const w = drawCanvas.getWidth();
+      const minH = getMinDocumentHeightForWidth(w);
+      const snapshot: CanvasSnapshot = {
+        imgLayer: { objects: [] },
+        textLayer: { objects: [] },
+        drawLayer: { objects: [] },
+        canvasWidth: w,
+        canvasHeight: minH,
+        savedAt: new Date().toISOString(),
+      };
+      await loadDrawing(snapshot);
+      pendingImageStorageDeletesRef.current.clear();
+      lastInsertedImageRef.current = null;
+      lastTextObjectRef.current = null;
+      setPencilColor(DEFAULT_PENCIL_COLOR);
+      pencilColorRef.current = DEFAULT_PENCIL_COLOR;
+      setTextFontSize(DEFAULT_TEXT_SIZE);
+      textFontSizeRef.current = DEFAULT_TEXT_SIZE;
+      setActiveTool("pencil");
+      activeToolRef.current = "pencil";
+      setIsImageDeleteMode(false);
+      isImageDeleteModeRef.current = false;
+      setDefaultWorkName("MyBoard");
+      router.replace("/");
+      recalcDocumentHeightRef.current?.();
+      requestSaveRef.current?.();
+    } finally {
+      isLoadingDrawingRef.current = false;
+    }
+  }, [loadDrawing, router]);
 
   useEffect(() => {
     if (
@@ -808,6 +857,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         roomFull={roomFull}
         maxRoomParticipants={MAX_ROOM_PARTICIPANTS}
         fileInputRef={fileInputRef}
+        onNewDocument={handleNewDocument}
         onPaletteColor={(hex) => {
           clearTextEditingVisuals();
           setPencilColor(hex);
