@@ -85,6 +85,47 @@ const DRAFT_ROOM_STORAGE_KEY = "myboard_draft_room";
 const DRAFT_EXPIRES_AT_KEY = "myboard_draft_expires_at";
 const DRAFT_ROW_ID_KEY = "myboard_draft_row_id";
 
+/** Ключ, чтобы не вешать на один IText два `changed` с размером. */
+const ITEXT_SIZE_LISTENER = "__myboardITextSizeRange";
+
+/**
+ * В `now` — диапазон [start, end) вставки или заменённого куска относительно `lastText`
+ * (содержимое до события `changed`). `selectionEnd` — позиция курсора после ввода.
+ */
+function findFontSizeApplyRange(
+  lastText: string,
+  now: string,
+  selectionEnd: number,
+): { start: number; end: number } | null {
+  if (now === lastText) {
+    return null;
+  }
+  if (now.length > lastText.length) {
+    const d = now.length - lastText.length;
+    const start = selectionEnd - d;
+    if (start >= 0 && d > 0) {
+      return { start, end: selectionEnd };
+    }
+    return null;
+  }
+  const pl = lastText.length;
+  const nl = now.length;
+  let l = 0;
+  while (l < pl && l < nl && lastText[l] === now[l]) {
+    l++;
+  }
+  let r0 = pl;
+  let r1 = nl;
+  while (r0 > l && r1 > l && lastText[r0 - 1] === now[r1 - 1]) {
+    r0--;
+    r1--;
+  }
+  if (l < r1) {
+    return { start: l, end: r1 };
+  }
+  return null;
+}
+
 type CanvasProps = {
   selectedDrawingId?: string | null;
 };
@@ -109,6 +150,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const isImageDeleteModeRef = useRef(false);
   const pencilColorRef = useRef<string>(DEFAULT_PENCIL_COLOR);
   const textFontSizeRef = useRef<TextSizeOption>(DEFAULT_TEXT_SIZE);
+  const bindITextSizeOnTextChangeRef = useRef<(t: fabric.IText) => void | null>(null);
   const pendingImageStorageDeletesRef = useRef<Set<string>>(new Set());
   const networkOpDepthRef = useRef(0);
   const draftSaveInFlightRef = useRef(false);
@@ -543,36 +585,50 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   };
 
   /**
-   * Размер из панели: только ref для новых блоков; для правки существующего IText
-   * — через per-char `setSelectionStyles` в точке вставки (конец строки / пусто),
-   * без `set('fontSize')` на весь объект и без перерисовки уже введённых глифов.
+   * На каждом `changed` применяет `textFontSizeRef` к только что вставленному / заменённому
+   * фрагменту (в т.ч. в середине абзаца), не трогая остальной текст.
    */
-  const applyTextFontSizeForSubsequentTyping = (px: TextSizeOption) => {
-    const textCanvas = textCanvasRef.current;
-    if (!textCanvas) {
+  const bindITextSizeOnTextChange = (t: fabric.IText) => {
+    const rec = t as unknown as Record<string, boolean>;
+    if (rec[ITEXT_SIZE_LISTENER]) {
       return;
     }
-    setTextFontSize(px);
-    textFontSizeRef.current = px;
-    const active = textCanvas.getActiveObject();
-    if (!(active instanceof fabric.IText) || !active.isEditing) {
-      return;
-    }
-    const s = active.selectionStart;
-    const e = active.selectionEnd;
-    const strLen = typeof active.text === "string" ? active.text.length : 0;
-    let applied = false;
-    if (s === e && s === strLen) {
-      active.setSelectionStyles({ fontSize: px }, s, s + 1);
-      active.initDimensions();
-      applied = true;
-    }
-    if (applied) {
-      setTextEditingVisuals(active);
-      textCanvas.requestRenderAll();
+    rec[ITEXT_SIZE_LISTENER] = true;
+    let lastText = typeof t.text === "string" ? t.text : "";
+    t.on("changed", () => {
+      const textCanvas = textCanvasRef.current;
+      if (isLoadingDrawingRef.current) {
+        lastText = typeof t.text === "string" ? t.text : "";
+        return;
+      }
+      const now = typeof t.text === "string" ? t.text : "";
+      const cursorAfter = t.selectionStart;
+      const range = findFontSizeApplyRange(lastText, now, cursorAfter);
+      if (range && range.end > range.start) {
+        t.setSelectionStyles(
+          { fontSize: textFontSizeRef.current },
+          range.start,
+          range.end,
+        );
+        t.initDimensions();
+        setTextEditingVisuals(t);
+      }
+      lastText = now;
+      if (textCanvas) {
+        textCanvas.requestRenderAll();
+      }
       recalcDocumentHeightRef.current?.();
       requestSaveRef.current?.();
-    }
+    });
+  };
+  bindITextSizeOnTextChangeRef.current = bindITextSizeOnTextChange;
+
+  /**
+   * Размер в панели: ref для след. ввода; фактическое применение — в `bindITextSizeOnTextChange` + `changed`.
+   */
+  const applyTextFontSizeForSubsequentTyping = (px: TextSizeOption) => {
+    setTextFontSize(px);
+    textFontSizeRef.current = px;
   };
 
   const clearTextEditingVisuals = () => {
@@ -667,6 +723,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       const texts = textCanvas
         .getObjects()
         .filter((obj): obj is fabric.IText => obj instanceof fabric.IText);
+      for (const t of texts) {
+        bindITextSizeOnTextChangeRef.current?.(t);
+      }
       const lastImage = images.length > 0 ? images[images.length - 1] : null;
       const lastText = texts.length > 0 ? texts[texts.length - 1] : null;
 
@@ -1486,11 +1545,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         recalcDocumentHeightRef.current?.();
         requestSaveRef.current?.();
       });
-      newText.on("changed", () => {
-        textCanvas.requestRenderAll();
-        recalcDocumentHeightRef.current?.();
-        requestSaveRef.current?.();
-      });
+      bindITextSizeOnTextChange(newText);
 
       lastTextObjectRef.current = newText;
       textCanvas.add(newText);
