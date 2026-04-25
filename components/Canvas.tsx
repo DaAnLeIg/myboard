@@ -52,6 +52,7 @@ import { useOfflineSync } from "../hooks/useOfflineSync";
 import { cn } from "../utils/cn";
 import { useLocale } from "../contexts/LocaleContext";
 import { useAppearance } from "../contexts/AppearanceContext";
+import { useSavedWorksRefresh } from "../contexts/SavedWorksRefreshContext";
 import StudioConsole, {
   STUDIO_CONSOLE_HEIGHT_PX,
   STUDIO_CONSOLE_MOBILE_HEADER_PX,
@@ -181,9 +182,11 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const [defaultWorkName, setDefaultWorkName] = useState("MyBoard");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const [saveSuccessTick, setSaveSuccessTick] = useState(0);
   const { inputBcp47, isTextRtl } = useLocale();
   const textInputLocaleRef = useRef({ bcp47: inputBcp47, rtl: isTextRtl });
   const { appearance, setAppearance } = useAppearance();
+  const { request: requestSavedWorksRefresh } = useSavedWorksRefresh();
   const undoStackRef = useRef<CanvasSnapshot[]>([]);
   const suppressHistoryUntilRef = useRef(0);
 
@@ -740,6 +743,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       data: CanvasSnapshot,
       opts?: { isCancelled?: () => boolean; skipHistorySeed?: boolean },
     ) => {
+      console.log("Загруженные данные:", data);
       const isCancelled = opts?.isCancelled ?? (() => false);
       const imgCanvas = imgCanvasRef.current;
       const textCanvas = textCanvasRef.current;
@@ -755,7 +759,35 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       textCanvas.backgroundColor = "rgba(0,0,0,0)";
       drawCanvas.backgroundColor = "rgba(0,0,0,0)";
 
-      const snapshot = data;
+      const raw = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+      const source = (
+        raw.content && typeof raw.content === "object"
+          ? (raw.content as Record<string, unknown>)
+          : raw
+      ) as Record<string, unknown>;
+      const snapshot = normalizeSnapshotByFabricType({
+        imgLayer: source.imgLayer ?? source.img_layer ?? { objects: [] },
+        textLayer: source.textLayer ?? source.text_layer ?? { objects: [] },
+        drawLayer: source.drawLayer ?? source.draw_layer ?? { objects: [] },
+        canvasWidth:
+          typeof source.canvasWidth === "number"
+            ? source.canvasWidth
+            : typeof source.canvas_width === "number"
+              ? source.canvas_width
+              : undefined,
+        canvasHeight:
+          typeof source.canvasHeight === "number"
+            ? source.canvasHeight
+            : typeof source.canvas_height === "number"
+              ? source.canvas_height
+              : drawCanvas.getHeight(),
+        savedAt:
+          typeof source.savedAt === "string"
+            ? source.savedAt
+            : typeof source.saved_at === "string"
+              ? source.saved_at
+              : new Date().toISOString(),
+      });
       const currentWidth = drawCanvas.getWidth();
       const restoredWidth =
         typeof snapshot.canvasWidth === "number" ? snapshot.canvasWidth : currentWidth;
@@ -1665,6 +1697,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     didManualSaveRef.current = true;
     try {
       const content = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
+      const previewDataUrl = drawCanvas.toDataURL({ format: "png", quality: 0.1 });
+      const roomIdForSave =
+        (typeof collabRoomId === "string" && collabRoomId.trim()) ||
+        `saved:${crypto.randomUUID()}`;
       await upsertProjectLocal({
         id: drawingIdToLoad ?? SUPABASE_DOCUMENT_ID,
         name: trimmed,
@@ -1673,31 +1709,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       const created = await createDrawing({
         name: trimmed,
         content,
-        roomId: collabRoomId,
-        previewUrl: null,
+        roomId: roomIdForSave,
+        previewUrl: previewDataUrl,
       });
-      try {
-        const previewBlob = await renderPreviewBlob(imgCanvas, textCanvas, drawCanvas);
-        const path = `previews/${created.id}.png`;
-        const { error: uploadError } = await supabase.storage
-          .from("images")
-          .upload(path, previewBlob, {
-            contentType: "image/png",
-            cacheControl: "60",
-            upsert: true,
-          });
-        if (!uploadError) {
-          const { data: pub } = supabase.storage.from("images").getPublicUrl(path);
-          await updateDrawing({
-            id: created.id,
-            previewUrl: pub.publicUrl,
-          });
-        } else {
-          console.warn("Library preview upload failed:", uploadError);
-        }
-      } catch (e) {
-        console.warn("Library preview build/upload failed:", e);
-      }
+      router.replace(`/?id=${created.id}`);
+      requestSavedWorksRefresh();
+      setSaveSuccessTick((n) => n + 1);
       if (draftRowIdRef.current) {
         try {
           await deleteDrawingById(draftRowIdRef.current);
@@ -1908,6 +1925,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         pencilWidth={pencilWidth}
         isImageDeleteMode={isImageDeleteMode}
         isSavingToDrawings={isSavingToDrawings}
+        saveSuccessTick={saveSuccessTick}
         isProcessing={isProcessing}
         networkErrorTick={networkErrorTick}
         onBackgroundNetworkError={bumpNetworkError}

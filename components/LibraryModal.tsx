@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import { useLocale } from "../contexts/LocaleContext";
 import { useAppearance } from "../contexts/AppearanceContext";
 import { getBoardTheme } from "../lib/boardTheme";
-import { type DrawingRow, listDrawings } from "../utils/drawingsApi";
-import { supabase } from "../utils/supabaseClient";
+import { type DrawingRow, deleteDrawingById, listDrawings } from "../utils/drawingsApi";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
+import { useSavedWorksRefresh } from "../contexts/SavedWorksRefreshContext";
 import { cn } from "../utils/cn";
 
 export default function LibraryModal() {
@@ -16,6 +16,7 @@ export default function LibraryModal() {
   const { appearance } = useAppearance();
   const { dark, ivory, light } = getBoardTheme(appearance);
   const { isOpen, close } = useLibraryModal();
+  const { register } = useSavedWorksRefresh();
   const router = useRouter();
   const titleId = useId();
   const [rows, setRows] = useState<DrawingRow[]>([]);
@@ -42,6 +43,13 @@ export default function LibraryModal() {
       void loadDrawings();
     }
   }, [isOpen, loadDrawings]);
+
+  useEffect(() => {
+    register(() => {
+      void loadDrawings();
+    });
+    return () => register(null);
+  }, [loadDrawings, register]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -99,11 +107,7 @@ export default function LibraryModal() {
     setDeletingId(rowId);
     try {
       console.log("Удаляю ID:", rowId);
-      const { error } = await supabase.from("drawings").delete().eq("id", rowId);
-      if (error) {
-        console.warn("Удаление работы:", error);
-        return;
-      }
+      await deleteDrawingById(rowId);
       setRows((list) => list.filter((r) => r.id !== rowId));
     } catch (e) {
       console.warn("Удаление работы:", e);

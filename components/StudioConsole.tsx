@@ -71,6 +71,7 @@ type StudioConsoleProps = {
   pencilWidth: 1 | 3 | 5;
   isImageDeleteMode: boolean;
   isSavingToDrawings: boolean;
+  saveSuccessTick?: number;
   /** Фоновые сетевые операции (Supabase, Storage, подготовка снимка). */
   isProcessing?: boolean;
   /** Увеличивается при ошибке фоновой операции — кратко подсвечивает иконку обновления. */
@@ -111,6 +112,7 @@ export default function StudioConsole({
   pencilWidth,
   isImageDeleteMode,
   isSavingToDrawings,
+  saveSuccessTick = 0,
   isProcessing = false,
   networkErrorTick = 0,
   onBackgroundNetworkError,
@@ -512,6 +514,7 @@ export default function StudioConsole({
   };
 
   const [refreshErrorFlash, setRefreshErrorFlash] = useState(false);
+  const [saveSuccessFlash, setSaveSuccessFlash] = useState(false);
   const [sharePanelOpen, setSharePanelOpen] = useState(false);
   const [navMoreOpen, setNavMoreOpen] = useState(false);
   const [navMorePos, setNavMorePos] = useState<{ top: number; left: number } | null>(null);
@@ -622,6 +625,15 @@ export default function StudioConsole({
     const id = window.setTimeout(() => setRefreshErrorFlash(false), 2200);
     return () => window.clearTimeout(id);
   }, [networkErrorTick]);
+
+  useEffect(() => {
+    if (!saveSuccessTick) {
+      return;
+    }
+    setSaveSuccessFlash(true);
+    const id = window.setTimeout(() => setSaveSuccessFlash(false), 1200);
+    return () => window.clearTimeout(id);
+  }, [saveSuccessTick]);
 
   const flashRefreshError = () => {
     onBackgroundNetworkError?.();
@@ -1450,7 +1462,16 @@ export default function StudioConsole({
                 type="button"
                 onClick={handleMainSaveClick}
                 disabled={isSavingToDrawings}
-                className={saveMenuRowClass(saveNameOpen)}
+                className={cn(
+                  saveMenuRowClass(saveNameOpen),
+                  saveSuccessFlash &&
+                    !isSavingToDrawings &&
+                    (dark
+                      ? "bg-emerald-900/60 text-emerald-300"
+                      : ivory
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-emerald-100 text-emerald-700"),
+                )}
                 title={t("action.saveHint")}
                 aria-expanded={saveNameOpen}
                 aria-controls={saveNameOpen ? popoverId : undefined}

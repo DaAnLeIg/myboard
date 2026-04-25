@@ -51,6 +51,56 @@ function extensionFromMime(mime: string, fallback: string) {
 }
 
 export type UploadResult = { publicUrl: string; storagePath: string };
+const A4_MAX_WIDTH_PX = 2480;
+const A4_JPEG_QUALITY = 0.8;
+
+async function blobToImageElement(blob: Blob): Promise<HTMLImageElement> {
+  const objectUrl = URL.createObjectURL(blob);
+  return await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to decode image for compression"));
+    };
+    img.src = objectUrl;
+  });
+}
+
+async function compressImageForA4(blob: Blob): Promise<Blob> {
+  if (!blob.type.startsWith("image/")) {
+    return blob;
+  }
+  const img = await blobToImageElement(blob);
+  const width = img.naturalWidth || img.width;
+  const height = img.naturalHeight || img.height;
+  if (width <= 0 || height <= 0) {
+    return blob;
+  }
+  if (width <= A4_MAX_WIDTH_PX) {
+    return blob;
+  }
+  const targetWidth = A4_MAX_WIDTH_PX;
+  const targetHeight = Math.max(1, Math.round((height * targetWidth) / width));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return blob;
+  }
+  context.drawImage(img, 0, 0, targetWidth, targetHeight);
+  return await new Promise((resolve) => {
+    canvas.toBlob(
+      (resizedBlob) => resolve(resizedBlob ?? blob),
+      "image/jpeg",
+      A4_JPEG_QUALITY,
+    );
+  });
+}
 
 /**
  * Загружает бинарные данные в бакет `images`, возвращает публичный URL и путь в бакете.
@@ -59,15 +109,20 @@ export async function uploadImageBlob(
   blob: Blob,
   opts?: { extension?: string; contentType?: string },
 ): Promise<UploadResult> {
+  const preparedBlob = await compressImageForA4(blob);
   const ext =
-    opts?.extension ?? extensionFromMime(opts?.contentType || blob.type || "image/png", "png");
+    opts?.extension ??
+    extensionFromMime(opts?.contentType || preparedBlob.type || blob.type || "image/png", "png");
   const storagePath = `uploads/${uuidv4()}.${ext}`;
   const contentType =
-    opts?.contentType || blob.type || (ext === "png" ? "image/png" : "application/octet-stream");
+    opts?.contentType ||
+    preparedBlob.type ||
+    blob.type ||
+    (ext === "png" ? "image/png" : "application/octet-stream");
 
   const { error: uploadError } = await supabase.storage
     .from(IMAGES_BUCKET)
-    .upload(storagePath, blob, { contentType, upsert: false, cacheControl: "3600" });
+    .upload(storagePath, preparedBlob, { contentType, upsert: false, cacheControl: "3600" });
 
   if (uploadError) {
     throw uploadError;

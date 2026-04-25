@@ -1,5 +1,7 @@
 import { supabase } from "./supabaseClient";
 import { getOrCreateOwnerToken } from "./ownerToken";
+import { v4 as uuidv4 } from "uuid";
+import { removeStorageObjects, tryParseStoragePathFromPublicUrl } from "./imageStorage";
 
 export type CanvasSnapshot = {
   imgLayer: unknown;
@@ -37,9 +39,11 @@ type UpdateDrawingInput = {
 
 export async function createDrawing(input: CreateDrawingInput) {
   const ownerToken = getOrCreateOwnerToken();
+  const id = uuidv4();
   const { data, error } = await supabase
     .from("drawings")
     .insert({
+      id,
       name: input.name,
       content: input.content,
       preview_url: input.previewUrl ?? null,
@@ -159,6 +163,15 @@ export async function updateDrawing(input: UpdateDrawingInput) {
 
 export async function deleteDrawingById(id: string) {
   const ownerToken = getOrCreateOwnerToken();
+  const { data: row, error: fetchError } = await supabase
+    .from("drawings")
+    .select("content, preview_url")
+    .eq("id", id)
+    .eq("owner_token", ownerToken)
+    .maybeSingle();
+  if (fetchError) {
+    throw fetchError;
+  }
   const { error } = await supabase
     .from("drawings")
     .delete()
@@ -166,5 +179,35 @@ export async function deleteDrawingById(id: string) {
     .eq("owner_token", ownerToken);
   if (error) {
     throw error;
+  }
+  const paths = new Set<string>();
+  const collect = (value: unknown) => {
+    if (typeof value === "string") {
+      const parsed = tryParseStoragePathFromPublicUrl(value);
+      if (parsed) {
+        paths.add(parsed);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        collect(item);
+      }
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const nested of Object.values(value as Record<string, unknown>)) {
+        collect(nested);
+      }
+    }
+  };
+  if (row?.content) {
+    collect(row.content);
+  }
+  if (row?.preview_url) {
+    collect(row.preview_url);
+  }
+  if (paths.size > 0) {
+    await removeStorageObjects([...paths]);
   }
 }

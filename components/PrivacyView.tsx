@@ -33,7 +33,7 @@ export function PrivacyView() {
         <Link
           href="/"
           className={cn(
-            "underline-offset-2 hover:underline",
+            "underline underline-offset-2",
             ivory ? "text-stone-800" : dark ? "text-zinc-200" : "text-zinc-700",
           )}
         >
