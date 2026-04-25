@@ -51,20 +51,7 @@ export const PENCIL_SWATCHES = [
 
 export type TextSizeOption = 10 | 14 | 18;
 
-/** Плавающая панель инструментов. */
-const floatingToolbar =
-  "inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-2xl bg-white px-2.5 py-1.5 shadow-lg";
-
-/** Вложенные группы: рамка с внутренними отступами. */
-const innerGroup =
-  "inline-flex h-8 min-h-8 shrink-0 items-center gap-0.5 rounded-xl border border-zinc-200/80 bg-zinc-50/30 px-1.5";
-
-const toolButtonBase =
-  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-0 p-0 text-zinc-900 transition outline-none";
-
-const toolButtonInactive = "bg-transparent hover:bg-gray-100";
-
-const toolButtonActive = "bg-gray-200";
+/** @see innerGroupClass / toolBtn* в StudioConsole (dark / ivory / light) */
 
 export type BoardChrome = "light" | "dark" | "ivory";
 
@@ -179,6 +166,52 @@ export default function StudioConsole({
           : "border-zinc-800 bg-zinc-900 text-white hover:bg-zinc-800",
     );
 
+  /** Группы кисти/текста/картинки: как chip-и навигации, с инверсией и «слоновой костью». */
+  const innerGroupClass = cn(
+    "inline-flex h-8 min-h-8 shrink-0 items-center gap-0.5 rounded-xl border px-1.5",
+    dark
+      ? "border-zinc-600/80 bg-zinc-800/55"
+      : ivory
+        ? "border-stone-300/80 bg-[#e4dfd0]/90"
+        : "border-zinc-200/80 bg-zinc-50/50",
+  );
+
+  /** Оболочка всей панели инструментов в полосе консоли. */
+  const consoleToolsClusterClass = cn(
+    "inline-flex max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-2xl border px-1.5 py-1 shadow-sm",
+    dark
+      ? "border-zinc-600/60 bg-zinc-900/45"
+      : ivory
+        ? "border-stone-300/75 bg-[#d8d2c2]/80"
+        : "border-zinc-200/90 bg-white/70",
+  );
+
+  const toolButtonBase = cn(
+    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-0 p-0 transition outline-none",
+    dark ? "text-zinc-100" : ivory ? "text-stone-900" : "text-zinc-900",
+  );
+  const toolButtonInactive = dark
+    ? "bg-transparent hover:bg-zinc-700/90"
+    : ivory
+      ? "bg-transparent hover:bg-[#cec6b0]/90"
+      : "bg-transparent hover:bg-zinc-100/90";
+  const toolButtonActive = dark ? "bg-zinc-600" : ivory ? "bg-[#c4b8a0]" : "bg-zinc-200";
+
+  const toolIconMuted = dark ? "text-zinc-400" : ivory ? "text-stone-500" : "text-zinc-500";
+  const toolTypeClass = dark ? "text-zinc-100" : ivory ? "text-stone-900" : "text-zinc-900";
+
+  const swatchSelectedRing = dark
+    ? "ring-1 ring-inset ring-zinc-200 ring-offset-0"
+    : ivory
+      ? "ring-1 ring-inset ring-stone-600/60 ring-offset-0"
+      : "ring-1 ring-inset ring-zinc-800 ring-offset-0";
+
+  const imageDeleteActive = dark
+    ? "bg-red-950/50 text-red-300 hover:bg-red-950/70"
+    : ivory
+      ? "bg-red-100/90 text-red-800 hover:bg-red-100"
+      : "bg-red-100 text-red-700 hover:bg-red-50";
+
   /** Участники в комнате — в одной строке с MyBoard (справа), высота как у кнопки MyBoard. */
   const participantStatusPill = (
     <div
@@ -225,29 +258,48 @@ export default function StudioConsole({
   const isPencilActive = activeTool === "pencil" && !isImageDeleteMode;
   const isEraserActive = activeTool === "eraser" && !isImageDeleteMode;
 
-  /** Три горизонтальные полоски слева от карандаша: сверху 1px, середина 3px, снизу 5px. Высота блока = h-6 (как у иконки карандаша). */
+  /** Три горизонтальные полоски слева от карандаша: сверху 1px, середина 3px, снизу 5px. */
   const pencilWidthStripeControl = (
     <div
       className="mr-0.5 flex h-6 w-3 shrink-0 flex-col gap-px"
       role="group"
       aria-label={t("pencil.groupWidth")}
     >
-      {([1, 3, 5] as const).map((w) => (
-        <button
-          key={w}
-          type="button"
-          onClick={() => onPencilWidthChange(w)}
-          className={cn(
-            "flex min-h-0 flex-1 w-full items-center justify-center rounded-sm border-0 p-0 transition outline-none",
-            pencilWidth === w ? "bg-zinc-200 ring-1 ring-inset ring-zinc-400/50" : "hover:bg-zinc-100",
-          )}
-          title={t("pencil.width", { w })}
-          aria-pressed={pencilWidth === w}
-          aria-label={t("pencil.widthLine", { w })}
-        >
-          <span className="block h-px w-full max-w-[11px] rounded-full bg-zinc-900" aria-hidden />
-        </button>
-      ))}
+      {([1, 3, 5] as const).map((w) => {
+        const active = pencilWidth === w;
+        return (
+          <button
+            key={w}
+            type="button"
+            onClick={() => onPencilWidthChange(w)}
+            className={cn(
+              "flex min-h-0 flex-1 w-full items-center justify-center rounded-sm border-0 p-0 transition outline-none",
+              active
+                ? dark
+                  ? "bg-zinc-600 ring-1 ring-inset ring-zinc-400/40"
+                  : ivory
+                    ? "bg-[#c4b8a0] ring-1 ring-inset ring-stone-500/45"
+                    : "bg-zinc-200 ring-1 ring-inset ring-zinc-400/50"
+                : dark
+                  ? "hover:bg-zinc-700/80"
+                  : ivory
+                    ? "hover:bg-[#d5cfbc]"
+                    : "hover:bg-zinc-100",
+            )}
+            title={t("pencil.width", { w })}
+            aria-pressed={active}
+            aria-label={t("pencil.widthLine", { w })}
+          >
+            <span
+              className={cn(
+                "block h-px w-full max-w-[11px] rounded-full",
+                dark ? "bg-zinc-100" : ivory ? "bg-stone-800" : "bg-zinc-900",
+              )}
+              aria-hidden
+            />
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -592,9 +644,13 @@ export default function StudioConsole({
 
   const toolbarContent = (
     <>
-      <div className={innerGroup}>
+      <div className={innerGroupClass}>
         {pencilWidthStripeControl}
-        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title={t("pencil.aria")} aria-hidden>
+        <span
+          className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center", toolIconMuted)}
+          title={t("pencil.aria")}
+          aria-hidden
+        >
           <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} />
         </span>
         <div className="grid grid-cols-3 grid-rows-2 gap-0.5" role="group" aria-label={t("pencil.colors")}>
@@ -606,7 +662,10 @@ export default function StudioConsole({
                 key={sw.key}
                 type="button"
                 onClick={() => onPaletteColor(sw.color)}
-                className={`h-2 w-2 border-0 p-0 transition ${selected ? "ring-1 ring-inset ring-zinc-800 ring-offset-0" : "ring-0 hover:opacity-90"} rounded-sm`}
+                className={cn(
+                  "h-2 w-2 border-0 p-0 transition rounded-sm",
+                  selected ? swatchSelectedRing : "ring-0 hover:opacity-90",
+                )}
                 style={{ backgroundColor: sw.color }}
                 title={t("pencil.swatch", { c: cname })}
                 aria-label={t("pencil.swatch", { c: cname })}
@@ -633,10 +692,25 @@ export default function StudioConsole({
             <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-60">
+        <PopoverContent
+          align="end"
+          className={cn(
+            "w-60",
+            dark && "border-zinc-600 bg-zinc-800 text-zinc-100",
+            ivory && "border-stone-300 bg-[#f4efe4] text-stone-900",
+            !dark && !ivory && "bg-white",
+          )}
+        >
           <div className="space-y-3">
             <div>
-              <p className="mb-1 text-xs font-medium text-zinc-700">{t("settings.widthLabel")}</p>
+              <p
+                className={cn(
+                  "mb-1 text-xs font-medium",
+                  dark ? "text-zinc-300" : ivory ? "text-stone-600" : "text-zinc-700",
+                )}
+              >
+                {t("settings.widthLabel")}
+              </p>
               <Slider
                 value={[pencilWidth]}
                 min={1}
@@ -646,7 +720,14 @@ export default function StudioConsole({
               />
             </div>
             <div>
-              <p className="mb-1 text-xs font-medium text-zinc-700">{t("settings.colorLabel")}</p>
+              <p
+                className={cn(
+                  "mb-1 text-xs font-medium",
+                  dark ? "text-zinc-300" : ivory ? "text-stone-600" : "text-zinc-700",
+                )}
+              >
+                {t("settings.colorLabel")}
+              </p>
               <ColorPicker color={pencilColor} onChange={onPaletteColor} />
             </div>
           </div>
@@ -747,7 +828,7 @@ export default function StudioConsole({
       >
         {mobileFabOpen ? (
           <div
-            className={`${floatingToolbar} mb-2 max-w-[86vw] flex-col items-start`}
+            className={cn(consoleToolsClusterClass, "mb-2 max-w-[86vw] flex-col items-start")}
             onPointerDown={(e) => {
               if (e.target === e.currentTarget) {
                 clearPanelLongPressTimer();
@@ -791,7 +872,14 @@ export default function StudioConsole({
           onPointerUpCapture={endDragHold}
           onPointerCancelCapture={endDragHold}
           onClick={toggleFab}
-          className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-zinc-900 text-white shadow-xl"
+          className={cn(
+            "inline-flex h-14 w-14 items-center justify-center rounded-full shadow-xl",
+            ivory
+              ? "bg-stone-800 text-[#f4efe4]"
+              : dark
+                ? "bg-zinc-200 text-zinc-900"
+                : "bg-zinc-900 text-white",
+          )}
           aria-label={mobileFabOpen ? t("mobile.fab.close") : t("mobile.fab.open")}
           title={mobileFabPinned ? t("mobile.fab.pinned") : t("mobile.fab.open")}
         >
@@ -808,7 +896,7 @@ export default function StudioConsole({
       >
         <div
           className={cn(
-            "mx-auto flex w-full flex-col gap-2 overflow-visible px-2.5 pb-0 pt-2",
+            "mx-auto flex w-full flex-col overflow-visible px-2.5 pb-2 pt-2",
             boardOuterMaxClass,
           )}
         >
@@ -896,140 +984,151 @@ export default function StudioConsole({
               >
                 <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
               </button>
+              <div
+                className={cn(
+                  consoleToolsClusterClass,
+                  "min-w-0 max-w-full sm:ms-auto",
+                  boardToolbarMaxClass,
+                )}
+                role="toolbar"
+                aria-label={t("header.mainToolbar")}
+              >
+                <div className={innerGroupClass}>
+                  {pencilWidthStripeControl}
+                  <span
+                    className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center", toolIconMuted)}
+                    title={t("pencil.aria")}
+                    aria-hidden
+                  >
+                    <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} />
+                  </span>
+                  <div
+                    className="grid grid-cols-3 grid-rows-2 gap-0.5"
+                    role="group"
+                    aria-label={t("pencil.colors")}
+                  >
+                    {PENCIL_SWATCHES.map((sw) => {
+                      const selected = isPencilActive && pencilColor === sw.color;
+                      const cname = t(`color.${sw.key}`);
+                      return (
+                        <button
+                          key={sw.key}
+                          type="button"
+                          onClick={() => onPaletteColor(sw.color)}
+                          className={cn(
+                            "h-2 w-2 border-0 p-0 transition rounded-sm",
+                            selected ? swatchSelectedRing : "ring-0 hover:opacity-90",
+                          )}
+                          style={{ backgroundColor: sw.color }}
+                          title={t("pencil.swatch", { c: cname })}
+                          aria-label={t("pencil.swatch", { c: cname })}
+                          aria-pressed={selected}
+                        />
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onEraser}
+                    className={`${toolButtonBase} ml-0.5 h-6 w-6 ${
+                      isEraserActive ? toolButtonActive : toolButtonInactive
+                    }`}
+                    title={t("eraser.aria")}
+                    aria-pressed={isEraserActive}
+                    aria-label={t("eraser.aria")}
+                  >
+                    <Eraser className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+                  </button>
+                </div>
+
+                <div className={innerGroupClass} role="group" aria-label={t("text.sizeGroup")}>
+                  <div className="flex h-8 min-h-8 min-w-0 items-center justify-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onTextSize(10)}
+                      className={cn(
+                        "flex h-6 w-6 shrink-0 items-center justify-center border-0 outline-none transition",
+                        toolTypeClass,
+                        textFontSize === 10 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`,
+                      )}
+                      title={t("text.sizeN", { n: 10 })}
+                      aria-pressed={textFontSize === 10}
+                      aria-label={t("text.allN", { n: 10 })}
+                    >
+                      <Type className="h-2.5 w-2.5 shrink-0" strokeWidth={ICON} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onTextSize(14)}
+                      className={cn(
+                        "flex h-6 w-6 shrink-0 items-center justify-center border-0 outline-none transition",
+                        toolTypeClass,
+                        textFontSize === 14 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`,
+                      )}
+                      title={t("text.sizeN", { n: 14 })}
+                      aria-pressed={textFontSize === 14}
+                      aria-label={t("text.allN", { n: 14 })}
+                    >
+                      <Type className="h-3 w-3 shrink-0" strokeWidth={ICON} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onTextSize(18)}
+                      className={cn(
+                        "flex h-6 w-6 shrink-0 items-center justify-center border-0 outline-none transition",
+                        toolTypeClass,
+                        textFontSize === 18 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`,
+                      )}
+                      title={t("text.sizeN", { n: 18 })}
+                      aria-pressed={textFontSize === 18}
+                      aria-label={t("text.allN", { n: 18 })}
+                    >
+                      <Type className="h-3.5 w-3.5 shrink-0" strokeWidth={ICON} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onAddText}
+                      className={cn(
+                        "ml-0.5 flex h-6 w-6 items-center justify-center border-0 p-0 outline-none transition",
+                        toolTypeClass,
+                        activeTool === "text" ? toolButtonActive : `rounded-md ${toolButtonInactive}`,
+                        "rounded-md",
+                      )}
+                      title={t("text.newBlock")}
+                      aria-label={t("text.addNew")}
+                    >
+                      <Plus className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+                    </button>
+                  </div>
+                </div>
+
+                <div className={innerGroupClass}>
+                  <button
+                    type="button"
+                    onClick={onAddImage}
+                    className={`${toolButtonBase} h-6 w-6 ${toolButtonInactive} rounded-md`}
+                    title={t("image.add")}
+                    aria-label={t("image.add")}
+                  >
+                    <ImageIcon className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onToggleImageDelete}
+                    className={cn(
+                      `${toolButtonBase} h-6 w-6 rounded-md`,
+                      isImageDeleteMode ? imageDeleteActive : toolButtonInactive,
+                    )}
+                    title={t("image.removeMode")}
+                    aria-pressed={isImageDeleteMode}
+                    aria-label={t("image.removeAria")}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+                  </button>
+                </div>
+              </div>
             </div>
             {participantStatusPill}
-          </div>
-
-          <div
-            className={cn(
-              "flex w-full min-w-0 flex-wrap items-center justify-center sm:justify-end",
-              boardToolbarMaxClass,
-            )}
-          >
-            <div className={floatingToolbar} role="toolbar" aria-label={t("header.mainToolbar")}>
-            <div className={innerGroup}>
-              {pencilWidthStripeControl}
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500" title={t("pencil.aria")} aria-hidden>
-                <Pencil className="h-3.5 w-3.5" strokeWidth={ICON} />
-              </span>
-              <div
-                className="grid grid-cols-3 grid-rows-2 gap-0.5"
-                role="group"
-                aria-label={t("pencil.colors")}
-              >
-                {PENCIL_SWATCHES.map((sw) => {
-                  const selected = isPencilActive && pencilColor === sw.color;
-                  const cname = t(`color.${sw.key}`);
-                  return (
-                    <button
-                      key={sw.key}
-                      type="button"
-                      onClick={() => onPaletteColor(sw.color)}
-                      className={`h-2 w-2 border-0 p-0 transition ${
-                        selected
-                          ? "ring-1 ring-inset ring-zinc-800 ring-offset-0"
-                          : "ring-0 hover:opacity-90"
-                      } rounded-sm`}
-                      style={{ backgroundColor: sw.color }}
-                      title={t("pencil.swatch", { c: cname })}
-                      aria-label={t("pencil.swatch", { c: cname })}
-                      aria-pressed={selected}
-                    />
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                onClick={onEraser}
-                className={`${toolButtonBase} ml-0.5 h-6 w-6 ${
-                  isEraserActive ? toolButtonActive : toolButtonInactive
-                }`}
-                title={t("eraser.aria")}
-                aria-pressed={isEraserActive}
-                aria-label={t("eraser.aria")}
-              >
-                <Eraser className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
-              </button>
-            </div>
-
-            <div className={innerGroup} role="group" aria-label={t("text.sizeGroup")}>
-              <div className="flex h-8 min-h-8 min-w-0 items-center justify-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => onTextSize(10)}
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center border-0 text-zinc-900 outline-none transition ${
-                    textFontSize === 10 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`
-                  }`}
-                  title={t("text.sizeN", { n: 10 })}
-                  aria-pressed={textFontSize === 10}
-                  aria-label={t("text.allN", { n: 10 })}
-                >
-                  <Type className="h-2.5 w-2.5 shrink-0" strokeWidth={ICON} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onTextSize(14)}
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center border-0 text-zinc-900 outline-none transition ${
-                    textFontSize === 14 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`
-                  }`}
-                  title={t("text.sizeN", { n: 14 })}
-                  aria-pressed={textFontSize === 14}
-                  aria-label={t("text.allN", { n: 14 })}
-                >
-                  <Type className="h-3 w-3 shrink-0" strokeWidth={ICON} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onTextSize(18)}
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center border-0 text-zinc-900 outline-none transition ${
-                    textFontSize === 18 ? `rounded-md ${toolButtonActive}` : `rounded-md ${toolButtonInactive}`
-                  }`}
-                  title={t("text.sizeN", { n: 18 })}
-                  aria-pressed={textFontSize === 18}
-                  aria-label={t("text.allN", { n: 18 })}
-                >
-                  <Type className="h-3.5 w-3.5 shrink-0" strokeWidth={ICON} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  onClick={onAddText}
-                  className={`ml-0.5 flex h-6 w-6 items-center justify-center border-0 p-0 text-zinc-900 outline-none transition ${
-                    activeTool === "text" ? toolButtonActive : `rounded-md ${toolButtonInactive}`
-                  } rounded-md`}
-                  title={t("text.newBlock")}
-                  aria-label={t("text.addNew")}
-                >
-                  <Plus className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
-                </button>
-              </div>
-            </div>
-
-            <div className={innerGroup}>
-              <button
-                type="button"
-                onClick={onAddImage}
-                className={`${toolButtonBase} h-6 w-6 ${toolButtonInactive} rounded-md`}
-                title={t("image.add")}
-                aria-label={t("image.add")}
-              >
-                <ImageIcon className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
-              </button>
-              <button
-                type="button"
-                onClick={onToggleImageDelete}
-                className={`${toolButtonBase} h-6 w-6 ${
-                  isImageDeleteMode
-                    ? "bg-red-100 text-red-700 hover:bg-red-50"
-                    : `${toolButtonInactive}`
-                } rounded-md`}
-                title={t("image.removeMode")}
-                aria-pressed={isImageDeleteMode}
-                aria-label={t("image.removeAria")}
-              >
-                <Trash2 className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
-              </button>
-            </div>
-            </div>
           </div>
         </div>
       </header>

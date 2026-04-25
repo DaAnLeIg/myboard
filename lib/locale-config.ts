@@ -15,15 +15,16 @@ export const LOCALE_ORDER: AppLocale[] = [
   "ar",
 ];
 
-export const LOCALE_LABELS_RU: Record<AppLocale, string> = {
+/** Название языка на самом языке (для списка в переключателе). */
+export const LOCALE_ENDONYMS: Record<AppLocale, string> = {
   ru: "Русский",
-  en: "Английский",
-  cs: "Чешский",
-  "es-AR": "Аргентинский",
-  hu: "Венгерский",
-  de: "Немецкий",
-  hi: "Индийский (хинди)",
-  ar: "Арабский",
+  en: "English",
+  cs: "Čeština",
+  "es-AR": "Español (Argentina)",
+  hu: "Magyar",
+  de: "Deutsch",
+  hi: "हिन्दी",
+  ar: "العربية",
 };
 
 export const BCP47_BY_LOCALE: Record<AppLocale, string> = {

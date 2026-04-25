@@ -3,7 +3,7 @@
 import { Globe } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocale } from "../contexts/LocaleContext";
-import { LOCALE_LABELS_RU, LOCALE_ORDER, type AppLocale } from "../lib/locale-config";
+import { LOCALE_ENDONYMS, LOCALE_ORDER, type AppLocale } from "../lib/locale-config";
 import { cn } from "../utils/cn";
 
 const ICON = 1.75 as const;
@@ -135,7 +135,7 @@ export function LanguagePicker({
                   setOpen(false);
                 }}
               >
-                {LOCALE_LABELS_RU[l]}
+                {LOCALE_ENDONYMS[l]}
               </button>
             </li>
           ))}
