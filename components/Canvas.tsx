@@ -45,16 +45,17 @@ import { cn } from "../utils/cn";
 import { useLocale } from "../contexts/LocaleContext";
 import StudioConsole, {
   STUDIO_CONSOLE_HEIGHT_PX,
+  STUDIO_CONSOLE_MOBILE_HEADER_PX,
   type BoardExportFormat,
   type TextSizeOption,
   type Tool,
 } from "./StudioConsole";
 
-/** Внешняя оболочка доски на десктопе — ~2/3 от прежних 1200px. */
-export const BOARD_OUTER_MAX_CLASS = "max-w-[800px]";
-/** Ширина рабочего поля: на sm+ ~2/3 от прежних 92vw / 980px. */
+/** Внешняя оболочка доски на десктопе. */
+export const BOARD_OUTER_MAX_CLASS = "max-w-[1200px]";
+/** Ширина рабочего поля (согласована с панелью инструментов). */
 export const BOARD_WIDTH_CLASS =
-  "relative w-[min(92vw,980px)] sm:w-[min(61.33vw,653px)] overflow-hidden rounded-md border shadow-sm";
+  "relative w-[min(92vw,980px)] overflow-hidden rounded-md border shadow-sm";
 
 type FabricWithEraser = typeof fabric & {
   EraserBrush?: new (canvas: fabric.Canvas) => fabric.BaseBrush;
@@ -1697,7 +1698,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     }
   };
 
-  const topChromePx = isMobileViewport ? 12 : STUDIO_CONSOLE_HEIGHT_PX;
+  const topChromePx = isMobileViewport
+    ? STUDIO_CONSOLE_MOBILE_HEADER_PX
+    : STUDIO_CONSOLE_HEIGHT_PX;
 
   const boardChrome = appearance.comfort ? "ivory" : appearance.inverted ? "dark" : "light";
 
@@ -1738,7 +1741,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         fileInputRef={fileInputRef}
         boardChrome={boardChrome}
         boardOuterMaxClass={BOARD_OUTER_MAX_CLASS}
-        boardToolbarMaxClass="w-full max-w-[min(92vw,980px)] sm:max-w-[min(61.33vw,653px)]"
+        boardToolbarMaxClass="w-full max-w-[min(92vw,980px)]"
         canUndo={canUndo}
         onUndo={() => {
           void performUndo();
