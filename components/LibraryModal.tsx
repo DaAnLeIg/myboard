@@ -4,12 +4,16 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { FolderOpen, Loader2, RefreshCw, Share2, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale } from "../contexts/LocaleContext";
+import { useAppearance } from "../contexts/AppearanceContext";
 import { type DrawingRow, listDrawings } from "../utils/drawingsApi";
 import { supabase } from "../utils/supabaseClient";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
 
 export default function LibraryModal() {
   const { t, localeBcp47 } = useLocale();
+  const { appearance } = useAppearance();
+  const dark = !appearance.comfort && appearance.inverted;
+  const ivory = appearance.comfort;
   const { isOpen, close } = useLibraryModal();
   const router = useRouter();
   const titleId = useId();
@@ -126,32 +130,74 @@ export default function LibraryModal() {
         aria-label={t("library.closeBg")}
       />
       <div
-        className="relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-2xl shadow-gray-200/50"
+        className={
+          dark
+            ? "relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-zinc-600/80 bg-zinc-900 shadow-2xl shadow-black/40"
+            : ivory
+              ? "relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-300/80 bg-[#f4efe4] shadow-2xl shadow-stone-900/15"
+              : "relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-2xl shadow-gray-200/50"
+        }
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={close}
-          className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
+          className={
+            dark
+              ? "absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100"
+              : ivory
+                ? "absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-stone-500 transition hover:bg-[#e8e4d4] hover:text-stone-900"
+                : "absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
+          }
           title={t("dialog.close")}
           aria-label={t("dialog.close")}
         >
           <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
         </button>
-        <div className="shrink-0 border-b border-gray-100 px-5 pb-5 pr-32 pt-6 sm:pr-40">
+        <div
+          className={
+            dark
+              ? "shrink-0 border-b border-zinc-700 px-5 pb-5 pr-32 pt-6 sm:pr-40"
+              : ivory
+                ? "shrink-0 border-b border-stone-300/80 px-5 pb-5 pr-32 pt-6 sm:pr-40"
+                : "shrink-0 border-b border-gray-100 px-5 pb-5 pr-32 pt-6 sm:pr-40"
+          }
+        >
           <h2
             id={titleId}
-            className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl"
+            className={
+              dark
+                ? "text-2xl font-bold tracking-tight text-zinc-100 sm:text-3xl"
+                : ivory
+                  ? "text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl"
+                  : "text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl"
+            }
           >
             {t("library.title")}
           </h2>
-          <p className="mt-1 text-sm text-gray-500">{t("library.sub")}</p>
+          <p
+            className={
+              dark
+                ? "mt-1 text-sm text-zinc-400"
+                : ivory
+                  ? "mt-1 text-sm text-stone-600"
+                  : "mt-1 text-sm text-gray-500"
+            }
+          >
+            {t("library.sub")}
+          </p>
         </div>
         <div className="absolute right-14 top-3 z-10">
           <button
             type="button"
             onClick={() => void loadDrawings()}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
+            className={
+              dark
+                ? "inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-200"
+                : ivory
+                  ? "inline-flex h-9 w-9 items-center justify-center rounded-full text-stone-500 transition hover:bg-[#e8e4d4] hover:text-stone-900"
+                  : "inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
+            }
             title={t("library.refresh")}
             aria-label={t("library.refreshAria")}
           >
@@ -160,7 +206,17 @@ export default function LibraryModal() {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
-            <div className="flex items-center gap-2 py-2 text-gray-400" aria-busy="true" aria-live="polite">
+            <div
+              className={
+                dark
+                  ? "flex items-center gap-2 py-2 text-zinc-500"
+                  : ivory
+                    ? "flex items-center gap-2 py-2 text-stone-500"
+                    : "flex items-center gap-2 py-2 text-gray-400"
+              }
+              aria-busy="true"
+              aria-live="polite"
+            >
               <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={1.75} aria-hidden />
               <span className="sr-only">{t("library.loadList")}</span>
             </div>
@@ -169,7 +225,17 @@ export default function LibraryModal() {
               {t("library.loadErr")}: {error}
             </p>
           ) : rows.length === 0 ? (
-            <p className="text-sm text-gray-500">{t("library.empty")}</p>
+            <p
+              className={
+                dark
+                  ? "text-sm text-zinc-500"
+                  : ivory
+                    ? "text-sm text-stone-600"
+                    : "text-sm text-gray-500"
+              }
+            >
+              {t("library.empty")}
+            </p>
           ) : (
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {rows.map((row) => {
@@ -177,10 +243,24 @@ export default function LibraryModal() {
                 return (
                   <li
                     key={row.id}
-                    className="group flex min-h-[7.5rem] flex-col rounded-xl border border-gray-100 bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
+                    className={
+                      dark
+                        ? "group flex min-h-[7.5rem] flex-col rounded-xl border border-zinc-700/90 bg-zinc-800/80 p-3 shadow-sm transition-shadow hover:shadow-md"
+                        : ivory
+                          ? "group flex min-h-[7.5rem] flex-col rounded-xl border border-stone-300/80 bg-[#faf8f3] p-3 shadow-sm transition-shadow hover:shadow-md"
+                          : "group flex min-h-[7.5rem] flex-col rounded-xl border border-gray-100 bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
+                    }
                     title={row.id}
                   >
-                    <div className="mb-2 h-28 w-full overflow-hidden rounded-lg bg-gray-100">
+                    <div
+                      className={
+                        dark
+                          ? "mb-2 h-28 w-full overflow-hidden rounded-lg bg-zinc-900"
+                          : ivory
+                            ? "mb-2 h-28 w-full overflow-hidden rounded-lg bg-stone-200/80"
+                            : "mb-2 h-28 w-full overflow-hidden rounded-lg bg-gray-100"
+                      }
+                    >
                       {row.preview_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -190,16 +270,40 @@ export default function LibraryModal() {
                           loading="lazy"
                         />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+                        <div
+                          className={
+                            dark
+                              ? "flex h-full w-full items-center justify-center text-xs text-zinc-500"
+                              : ivory
+                                ? "flex h-full w-full items-center justify-center text-xs text-stone-500"
+                                : "flex h-full w-full items-center justify-center text-xs text-gray-400"
+                          }
+                        >
                           {t("library.noPreview")}
                         </div>
                       )}
                     </div>
-                    <h3 className="line-clamp-2 min-h-0 text-sm font-bold leading-snug text-gray-900">
+                    <h3
+                      className={
+                        dark
+                          ? "line-clamp-2 min-h-0 text-sm font-bold leading-snug text-zinc-100"
+                          : ivory
+                            ? "line-clamp-2 min-h-0 text-sm font-bold leading-snug text-stone-900"
+                            : "line-clamp-2 min-h-0 text-sm font-bold leading-snug text-gray-900"
+                      }
+                    >
                       {row.name || t("library.unnamed")}
                     </h3>
                     <div className="mt-auto w-full pt-4">
-                      <p className="text-xs leading-relaxed text-gray-500">
+                      <p
+                        className={
+                          dark
+                            ? "text-xs leading-relaxed text-zinc-500"
+                            : ivory
+                              ? "text-xs leading-relaxed text-stone-600"
+                              : "text-xs leading-relaxed text-gray-500"
+                        }
+                      >
                         {row.created_at
                           ? new Date(row.created_at).toLocaleString(localeBcp47, {
                               dateStyle: "medium",
@@ -211,7 +315,13 @@ export default function LibraryModal() {
                         <button
                           type="button"
                           onClick={() => openOnBoard(row.id)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+                          className={
+                            dark
+                              ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100"
+                              : ivory
+                                ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-[#e8e4d4] hover:text-stone-900"
+                                : "inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+                          }
                           title={t("library.open")}
                           aria-label={t("library.openAria", {
                             name: row.name || t("library.unnamed"),
@@ -223,7 +333,13 @@ export default function LibraryModal() {
                         <button
                           type="button"
                           onClick={() => void shareDrawingLink(row.id)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+                          className={
+                            dark
+                              ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100"
+                              : ivory
+                                ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-[#e8e4d4] hover:text-stone-900"
+                                : "inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+                          }
                           title={t("library.share")}
                           aria-label={t("library.shareAria", { name: row.name || t("library.unnamed") })}
                           disabled={busy}
@@ -234,13 +350,19 @@ export default function LibraryModal() {
                           type="button"
                           onClick={() => void onDelete(row)}
                           disabled={busy}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-950/50 dark:hover:text-red-400"
                           title={t("library.delete")}
                           aria-label={t("library.deleteAria", { name: row.name || t("library.unnamed") })}
                         >
                           {busy ? (
                             <Loader2
-                              className="h-4 w-4 shrink-0 animate-spin text-gray-500"
+                              className={
+                                dark
+                                  ? "h-4 w-4 shrink-0 animate-spin text-zinc-500"
+                                  : ivory
+                                    ? "h-4 w-4 shrink-0 animate-spin text-stone-500"
+                                    : "h-4 w-4 shrink-0 animate-spin text-gray-500"
+                              }
                               strokeWidth={1.75}
                               aria-hidden
                             />

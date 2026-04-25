@@ -43,6 +43,7 @@ import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollabo
 import { useOfflineSync } from "../hooks/useOfflineSync";
 import { cn } from "../utils/cn";
 import { useLocale } from "../contexts/LocaleContext";
+import { useAppearance } from "../contexts/AppearanceContext";
 import StudioConsole, {
   STUDIO_CONSOLE_HEIGHT_PX,
   STUDIO_CONSOLE_MOBILE_HEADER_PX,
@@ -51,11 +52,14 @@ import StudioConsole, {
   type Tool,
 } from "./StudioConsole";
 
-/** Внешняя оболочка доски на десктопе. */
-export const BOARD_OUTER_MAX_CLASS = "max-w-[1200px]";
-/** Ширина рабочего поля (согласована с панелью инструментов). */
+/** Внешняя оболочка доски (~2/3 от 1200px), совпадает с колонкой консоли. */
+export const BOARD_OUTER_MAX_CLASS = "max-w-[800px]";
+/**
+ * Ширина рабочего поля: 2/3 от min(92vw, 980px) — визуально согласована с max-w 800
+ * при типичных ширинах окна.
+ */
 export const BOARD_WIDTH_CLASS =
-  "relative w-[min(92vw,980px)] overflow-hidden rounded-md border shadow-sm";
+  "relative w-[min(61.33vw,653px)] overflow-hidden rounded-md border shadow-sm";
 
 type FabricWithEraser = typeof fabric & {
   EraserBrush?: new (canvas: fabric.Canvas) => fabric.BaseBrush;
@@ -126,10 +130,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const [canUndo, setCanUndo] = useState(false);
   const { inputBcp47, isTextRtl } = useLocale();
   const textInputLocaleRef = useRef({ bcp47: inputBcp47, rtl: isTextRtl });
-  const [appearance, setAppearance] = useState<{ inverted: boolean; comfort: boolean }>({
-    inverted: false,
-    comfort: false,
-  });
+  const { appearance, setAppearance } = useAppearance();
   const undoStackRef = useRef<CanvasSnapshot[]>([]);
   const suppressHistoryUntilRef = useRef(0);
 
@@ -1515,11 +1516,34 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         name: trimmed,
         updated_at: content.savedAt,
       });
-      await createDrawing({
+      const created = await createDrawing({
         name: trimmed,
         content,
         roomId: collabRoomId,
+        previewUrl: null,
       });
+      try {
+        const previewBlob = await renderPreviewBlob(imgCanvas, textCanvas, drawCanvas);
+        const path = `previews/${created.id}.png`;
+        const { error: uploadError } = await supabase.storage
+          .from("images")
+          .upload(path, previewBlob, {
+            contentType: "image/png",
+            cacheControl: "60",
+            upsert: true,
+          });
+        if (!uploadError) {
+          const { data: pub } = supabase.storage.from("images").getPublicUrl(path);
+          await updateDrawing({
+            id: created.id,
+            previewUrl: pub.publicUrl,
+          });
+        } else {
+          console.warn("Library preview upload failed:", uploadError);
+        }
+      } catch (e) {
+        console.warn("Library preview build/upload failed:", e);
+      }
       if (draftRowIdRef.current) {
         try {
           await deleteDrawingById(draftRowIdRef.current);
@@ -1741,7 +1765,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         fileInputRef={fileInputRef}
         boardChrome={boardChrome}
         boardOuterMaxClass={BOARD_OUTER_MAX_CLASS}
-        boardToolbarMaxClass="w-full max-w-[min(92vw,980px)]"
+        boardToolbarMaxClass="w-fit max-w-full shrink-0"
         canUndo={canUndo}
         onUndo={() => {
           void performUndo();

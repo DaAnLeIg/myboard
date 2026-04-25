@@ -178,9 +178,9 @@ export default function StudioConsole({
         : "border-zinc-200/80 bg-zinc-50/50",
   );
 
-  /** Оболочка всей панели инструментов в полосе консоли. */
+  /** Оболочка панели инструментов — по ширине чуть больше ряда иконок (w-fit + отступы). */
   const consoleToolsClusterClass = cn(
-    "inline-flex max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-2xl border px-1.5 py-1 shadow-sm",
+    "inline-flex w-fit max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-2xl border px-2 py-1.5 shadow-sm",
     dark
       ? "border-zinc-600/60 bg-zinc-900/45"
       : ivory
@@ -213,6 +213,120 @@ export default function StudioConsole({
     : ivory
       ? "bg-red-100/90 text-red-800 hover:bg-red-100"
       : "bg-red-100 text-red-700 hover:bg-red-50";
+
+  const navMoreMenuSurface = cn(
+    "fixed z-[96] max-h-[min(90vh,calc(100vh-4rem))] overflow-y-auto rounded-xl border py-1.5 shadow-xl",
+    dark
+      ? "border-zinc-600 bg-zinc-800 text-zinc-100"
+      : ivory
+        ? "border-stone-300 bg-[#f4efe4] text-stone-900"
+        : "border-zinc-200 bg-white text-zinc-900",
+  );
+  const navMoreRow = cn(
+    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition",
+    dark
+      ? "text-zinc-100 hover:bg-zinc-700/90"
+      : ivory
+        ? "text-stone-900 hover:bg-[#ddd8c8]/90"
+        : "text-zinc-800 hover:bg-zinc-50",
+  );
+  const navMoreRowLink = cn(
+    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition",
+    dark
+      ? "text-zinc-100 hover:bg-zinc-700/90"
+      : ivory
+        ? "text-stone-900 hover:bg-[#ddd8c8]/90"
+        : "text-zinc-800 hover:bg-zinc-50",
+  );
+  const navMoreDivider = dark ? "bg-zinc-600" : ivory ? "bg-stone-300" : "bg-zinc-200";
+  const saveNamePopoverClass = cn(
+    "absolute left-0 right-0 top-full z-[80] mt-1.5 rounded-md border p-2 shadow-lg",
+    dark
+      ? "border-zinc-600 bg-zinc-900"
+      : ivory
+        ? "border-stone-300 bg-[#ebe6d8]"
+        : "border-zinc-200 bg-white",
+  );
+  const formLabelClass = dark ? "text-zinc-300" : ivory ? "text-stone-600" : "text-zinc-700";
+  const workNameInputClass = cn(
+    "min-w-0 flex-1 rounded-md border px-2 py-1.5 text-sm focus:outline-none focus:ring-1",
+    dark
+      ? "border-zinc-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-400 focus:ring-zinc-500"
+      : ivory
+        ? "border-stone-400 bg-[#faf8f3] text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:ring-stone-400"
+        : "border-zinc-300 bg-white text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-zinc-400",
+  );
+  const saveMenuRowClass = (isOpen: boolean) =>
+    cn(
+      "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition",
+      isSavingToDrawings
+        ? "cursor-not-allowed opacity-50"
+        : isOpen
+          ? dark
+            ? "bg-zinc-700 text-zinc-100"
+            : ivory
+              ? "bg-[#d5cfbc] text-stone-900"
+              : "bg-zinc-200 text-zinc-900"
+          : dark
+            ? "text-zinc-100 hover:bg-zinc-700/90"
+            : ivory
+              ? "text-stone-900 hover:bg-[#ddd8c8]/90"
+              : "text-zinc-800 hover:bg-zinc-50",
+    );
+  const saveConfirmIconBtn = cn(
+    "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition",
+    dark
+      ? "border-zinc-200 bg-zinc-200 text-zinc-900 hover:bg-zinc-100"
+      : ivory
+        ? "border-stone-600 bg-stone-800 text-[#f4efe4] hover:bg-stone-700"
+        : "border-zinc-800 bg-zinc-900 text-white hover:bg-zinc-800",
+  );
+  const shareDialogSurface = cn(
+    "relative z-[1] w-full max-w-md rounded-2xl border p-5 shadow-2xl",
+    dark
+      ? "border-zinc-600 bg-zinc-800"
+      : ivory
+        ? "border-stone-300 bg-[#f4efe4]"
+        : "border-zinc-200 bg-white",
+  );
+  const shareDialogTitle = dark ? "text-zinc-100" : ivory ? "text-stone-900" : "text-zinc-900";
+  const shareDialogMuted = dark ? "text-zinc-400" : ivory ? "text-stone-600" : "text-zinc-500";
+  const shareDialogBody = dark ? "text-zinc-300" : ivory ? "text-stone-800" : "text-zinc-700";
+  const shareCloseBtn = cn(
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition",
+    dark
+      ? "text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+      : ivory
+        ? "text-stone-500 hover:bg-[#e8e4d4] hover:text-stone-900"
+        : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900",
+  );
+  const shareFieldLabel = dark ? "text-zinc-400" : ivory ? "text-stone-600" : "text-zinc-500";
+  const shareMono = dark ? "text-zinc-200" : ivory ? "text-stone-900" : "text-zinc-900";
+  const shareMonoSm = dark ? "text-zinc-400" : ivory ? "text-stone-700" : "text-zinc-700";
+  const shareCopyBtn = cn(
+    "mt-2 w-full rounded-lg border py-2 text-sm font-medium transition",
+    dark
+      ? "border-zinc-500 bg-zinc-700/80 text-zinc-100 hover:bg-zinc-700"
+      : ivory
+        ? "border-stone-400 bg-[#e8e4d4] text-stone-900 hover:bg-[#ddd8c8]"
+        : "border-zinc-300 bg-zinc-50 text-zinc-800 hover:bg-zinc-100",
+  );
+  const shareNativeBtn = cn(
+    "inline-flex w-full items-center justify-center rounded-lg border px-4 py-2.5 text-sm font-medium transition sm:w-auto",
+    dark
+      ? "border-zinc-200 bg-zinc-200 text-zinc-900 hover:bg-zinc-100"
+      : ivory
+        ? "border-stone-700 bg-stone-800 text-[#f4efe4] hover:bg-stone-700"
+        : "border-zinc-800 bg-zinc-900 text-white hover:bg-zinc-800",
+  );
+  const shareDoneBtn = cn(
+    "inline-flex w-full items-center justify-center rounded-lg border px-4 py-2.5 text-sm font-medium transition sm:w-auto",
+    dark
+      ? "border-zinc-500 bg-zinc-700/50 text-zinc-100 hover:bg-zinc-700"
+      : ivory
+        ? "border-stone-300 bg-[#e8e4d4] text-stone-900 hover:bg-[#ddd8c8]"
+        : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50",
+  );
 
   /** Участники в комнате — как кнопки-иконки в шапке, без тени. */
   const participantStatusPill = (
@@ -737,11 +851,7 @@ export default function StudioConsole({
 
   const mainConsoleToolbar = (
     <div
-      className={cn(
-        consoleToolsClusterClass,
-        "min-w-0 max-w-full",
-        boardToolbarMaxClass,
-      )}
+      className={cn(consoleToolsClusterClass, "shrink-0", boardToolbarMaxClass)}
       role="toolbar"
       aria-label={t("header.mainToolbar")}
     >
@@ -955,7 +1065,7 @@ export default function StudioConsole({
             <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
         </div>
-        <div className="flex w-full min-w-0 items-center gap-1.5">
+        <div className="flex w-full min-w-0 items-center justify-center gap-1.5">
           <button
             type="button"
             disabled={!canUndo}
@@ -1052,8 +1162,8 @@ export default function StudioConsole({
             boardOuterMaxClass,
           )}
         >
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5 shrink-0">
+          <div className="grid w-full min-w-0 grid-cols-[1fr_auto_1fr] items-center gap-1.5">
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
               <Link
                 href="/"
                 className={cn(
@@ -1127,20 +1237,21 @@ export default function StudioConsole({
                 <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
               </button>
             </div>
-            <button
-              type="button"
-              disabled={!canUndo}
-              onClick={() => onUndo()}
-              className={`${navLinkClass(false)} h-9 w-9 shrink-0 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
-              title={t("nav.undo")}
-              aria-label={t("nav.undo")}
-            >
-              <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-            </button>
-            <div className="min-w-0 flex-1 basis-0 sm:min-w-0">
+            <div className="flex w-max min-w-0 max-w-full shrink-0 items-center justify-center justify-self-center gap-1.5">
+              <button
+                type="button"
+                disabled={!canUndo}
+                onClick={() => onUndo()}
+                className={`${navLinkClass(false)} h-9 w-9 shrink-0 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
+                title={t("nav.undo")}
+                aria-label={t("nav.undo")}
+              >
+                <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
               {mainConsoleToolbar}
+              {participantStatusPill}
             </div>
-            {participantStatusPill}
+            <div className="min-w-0" aria-hidden />
           </div>
         </div>
       </header>
@@ -1150,7 +1261,7 @@ export default function StudioConsole({
           id="nav-console-more-menu"
           role="menu"
           aria-label={t("nav.ariaMore")}
-          className="fixed z-[96] max-h-[min(90vh,calc(100vh-4rem))] overflow-y-auto rounded-xl border border-zinc-200 bg-white py-1.5 shadow-xl"
+          className={navMoreMenuSurface}
           style={{
             top: navMorePos.top,
             left: navMorePos.left,
@@ -1165,7 +1276,7 @@ export default function StudioConsole({
                 closeNavMore();
                 setSharePanelOpen(true);
               }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
+              className={navMoreRow}
             >
               <Share2 className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
               <span>{t("action.share")}</span>
@@ -1174,24 +1285,18 @@ export default function StudioConsole({
               href="/privacy"
               role="menuitem"
               onClick={() => closeNavMore()}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-zinc-800 transition hover:bg-zinc-50"
+              className={navMoreRowLink}
             >
               <CircleAlert className="h-4 w-4 shrink-0" strokeWidth={ICON} aria-hidden />
               <span>{t("action.privacy")}</span>
             </Link>
-            <div className="my-1 h-px shrink-0 bg-zinc-200" aria-hidden />
+            <div className={cn("my-1 h-px shrink-0", navMoreDivider)} aria-hidden />
             <div className="relative w-full px-0.5" ref={saveGroupRef}>
               <button
                 type="button"
                 onClick={handleMainSaveClick}
                 disabled={isSavingToDrawings}
-                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition ${
-                  isSavingToDrawings
-                    ? "cursor-not-allowed opacity-50"
-                    : saveNameOpen
-                      ? "bg-zinc-200 text-zinc-900"
-                      : "text-zinc-800 hover:bg-zinc-50"
-                }`}
+                className={saveMenuRowClass(saveNameOpen)}
                 title={t("action.saveHint")}
                 aria-expanded={saveNameOpen}
                 aria-controls={saveNameOpen ? popoverId : undefined}
@@ -1207,7 +1312,7 @@ export default function StudioConsole({
               {saveNameOpen && !isSavingToDrawings ? (
                 <div
                   id={popoverId}
-                  className="absolute left-0 right-0 top-full z-[80] mt-1.5 rounded-md border border-zinc-200 bg-white p-2 shadow-lg"
+                  className={saveNamePopoverClass}
                   role="region"
                   aria-label={t("form.workName")}
                   onKeyDown={(e) => {
@@ -1217,13 +1322,13 @@ export default function StudioConsole({
                     }
                   }}
                 >
-                  <label className="block text-xs font-medium text-zinc-700" htmlFor={`${popoverId}-input`}>
+                  <label className={cn("block text-xs font-medium", formLabelClass)} htmlFor={`${popoverId}-input`}>
                     {t("form.workName")}
                   </label>
                   <div className="mt-1 flex items-center gap-1.5">
                     <input
                       id={`${popoverId}-input`}
-                      className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                      className={workNameInputClass}
                       value={workName}
                       onChange={(e) => setWorkName(e.target.value)}
                       placeholder={defaultWorkName}
@@ -1234,7 +1339,7 @@ export default function StudioConsole({
                     <button
                       type="button"
                       onClick={handleConfirmSave}
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-800 bg-zinc-900 text-white transition hover:bg-zinc-800"
+                      className={saveConfirmIconBtn}
                       title={t("form.confirm")}
                       aria-label={t("form.confirmSave")}
                     >
@@ -1248,7 +1353,7 @@ export default function StudioConsole({
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
+                className={navMoreRow}
                 title={t("export.png")}
                 aria-label={t("export.png")}
                 onClick={() => {
@@ -1262,7 +1367,7 @@ export default function StudioConsole({
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
+                className={navMoreRow}
                 title={t("export.jpg")}
                 aria-label={t("export.jpg")}
                 onClick={() => {
@@ -1276,7 +1381,7 @@ export default function StudioConsole({
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-50"
+                className={navMoreRow}
                 title={t("export.pdf")}
                 aria-label={t("export.pdf")}
                 onClick={() => {
@@ -1307,49 +1412,52 @@ export default function StudioConsole({
             role="dialog"
             aria-modal="true"
             aria-labelledby={sharePanelTitleId}
-            className="relative z-[1] w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl"
+            className={shareDialogSurface}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
-              <h2 id={sharePanelTitleId} className="text-lg font-semibold text-zinc-900">
+              <h2 id={sharePanelTitleId} className={cn("text-lg font-semibold", shareDialogTitle)}>
                 {t("share.title")}
               </h2>
               <button
                 type="button"
                 onClick={() => setSharePanelOpen(false)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                className={shareCloseBtn}
                 title={t("dialog.close")}
                 aria-label={t("dialog.close")}
               >
                 <X className="h-4 w-4" strokeWidth={ICON} aria-hidden />
               </button>
             </div>
-            <p className="mt-1 text-sm text-zinc-500">
-              {t("share.body")}
-            </p>
+            <p className={cn("mt-1 text-sm", shareDialogMuted)}>{t("share.body")}</p>
 
             <div className="mt-4 space-y-4">
               <div>
-                <p className="text-xs font-medium text-zinc-500">{t("share.roomLabel")}</p>
-                <p className="mt-1 break-all font-mono text-sm text-zinc-900">{collabRoomId}</p>
+                <p className={cn("text-xs font-medium", shareFieldLabel)}>{t("share.roomLabel")}</p>
+                <p className={cn("mt-1 break-all font-mono text-sm", shareMono)}>{collabRoomId}</p>
                 <button
                   type="button"
                   onClick={() => void copyRoomIdToClipboard()}
-                  className="mt-2 w-full rounded-lg border border-zinc-300 bg-zinc-50 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-100"
+                  className={shareCopyBtn}
                 >
                   {t("share.copyRoom")}
                 </button>
               </div>
               <div>
-                <p className="text-xs font-medium text-zinc-500">{t("share.inviteLabel")}</p>
-                <p className="mt-1 max-h-24 overflow-y-auto break-all font-mono text-xs leading-relaxed text-zinc-700">
+                <p className={cn("text-xs font-medium", shareFieldLabel)}>{t("share.inviteLabel")}</p>
+                <p
+                  className={cn(
+                    "mt-1 max-h-24 overflow-y-auto break-all font-mono text-xs leading-relaxed",
+                    shareMonoSm,
+                  )}
+                >
                   {buildRoomInviteUrl() ?? "—"}
                 </p>
                 <button
                   type="button"
                   onClick={() => void copyInviteUrlToClipboard()}
                   disabled={!buildRoomInviteUrl()}
-                  className="mt-2 w-full rounded-lg border border-zinc-300 bg-zinc-50 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  className={cn(shareCopyBtn, "disabled:cursor-not-allowed disabled:opacity-40")}
                 >
                   {t("share.copyLink")}
                 </button>
@@ -1357,7 +1465,12 @@ export default function StudioConsole({
             </div>
 
             {roomFull ? (
-              <p className="mt-3 text-xs font-medium text-amber-700">
+              <p
+                className={cn(
+                  "mt-3 text-xs font-medium",
+                  dark ? "text-amber-300" : ivory ? "text-amber-800" : "text-amber-700",
+                )}
+              >
                 {t("share.roomFull", { max: maxRoomParticipants })}
               </p>
             ) : null}
@@ -1371,15 +1484,11 @@ export default function StudioConsole({
                     setSharePanelOpen(false);
                   }
                 }}
-                className="inline-flex w-full items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 sm:w-auto"
+                className={shareNativeBtn}
               >
                 {t("share.native")}
               </button>
-              <button
-                type="button"
-                onClick={() => setSharePanelOpen(false)}
-                className="inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 sm:w-auto"
-              >
+              <button type="button" onClick={() => setSharePanelOpen(false)} className={shareDoneBtn}>
                 {t("share.done")}
               </button>
             </div>
