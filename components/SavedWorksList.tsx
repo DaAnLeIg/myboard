@@ -17,7 +17,7 @@ export default function SavedWorksList({
   const [items, setItems] = useState<DrawingRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { register } = useSavedWorksRefresh();
+  const { register, registerCreated } = useSavedWorksRefresh();
 
   const loadItems = useCallback(async () => {
     setIsLoading(true);
@@ -53,6 +53,16 @@ export default function SavedWorksList({
       register(null);
     };
   }, [loadItems, register]);
+
+  useEffect(() => {
+    registerCreated((row) => {
+      setItems((prev) => {
+        const withoutSame = prev.filter((x) => x.id !== row.id);
+        return [row, ...withoutSame];
+      });
+    });
+    return () => registerCreated(null);
+  }, [registerCreated]);
 
   return (
     <section className="mx-auto w-full max-w-[1200px] px-4 py-8">

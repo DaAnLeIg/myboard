@@ -189,7 +189,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const { inputBcp47, isTextRtl } = useLocale();
   const textInputLocaleRef = useRef({ bcp47: inputBcp47, rtl: isTextRtl });
   const { appearance, setAppearance } = useAppearance();
-  const { request: requestSavedWorksRefresh } = useSavedWorksRefresh();
+  const { request: requestSavedWorksRefresh, publishCreated: publishSavedWorkCreated } =
+    useSavedWorksRefresh();
   const undoStackRef = useRef<CanvasSnapshot[]>([]);
   const suppressHistoryUntilRef = useRef(0);
 
@@ -1802,6 +1803,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         previewUrl: previewDataUrl,
       });
       router.replace(`/?id=${created.id}`);
+      publishSavedWorkCreated(created);
       requestSavedWorksRefresh();
       setSaveSuccessTick((n) => n + 1);
       if (draftRowIdRef.current) {

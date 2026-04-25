@@ -5,6 +5,7 @@ import {
   FabricImage,
   IText,
   Path,
+  Textbox,
   util,
 } from "fabric";
 import { decode as decodeMsgPack, encode as encodeMsgPack } from "@msgpack/msgpack";
@@ -33,6 +34,7 @@ function addCustomProp(C: any, name: string) {
 void (function registerCollabId() {
   addCustomProp(FabricImage, COLLAB_ID_KEY);
   addCustomProp(IText, COLLAB_ID_KEY);
+  addCustomProp(Textbox, COLLAB_ID_KEY);
   addCustomProp(Path, COLLAB_ID_KEY);
 })();
 
@@ -140,6 +142,10 @@ type DrawEnvelope = {
 
 function isFabricImageType(t: string | undefined): boolean {
   return t === "Image" || t === "image";
+}
+
+function isFabricTextType(t: string | undefined): boolean {
+  return t === "IText" || t === "i-text" || t === "textbox" || t === "TextBox";
 }
 
 function applyCrossOriginToImageData(obj: Record<string, unknown>) {
@@ -409,14 +415,8 @@ export async function upsertObjectOnCanvas(
         canvas.requestRenderAll();
         return;
       }
-      const incomingText =
-        data.type === "IText" ||
-        data.type === "i-text" ||
-        data.type === "textbox";
-      const isTextObj =
-        existing.type === "IText" ||
-        existing.type === "i-text" ||
-        existing.type === "textbox";
+      const incomingText = isFabricTextType(data.type as string | undefined);
+      const isTextObj = isFabricTextType(existing.type as string | undefined);
       if (incomingText && isTextObj) {
         existing.set({
           ...pickTransform(data),
@@ -424,10 +424,29 @@ export async function upsertObjectOnCanvas(
           fontSize: (data as { fontSize?: number }).fontSize,
           fontFamily: (data as { fontFamily?: string }).fontFamily,
           fill: (data as { fill?: unknown }).fill,
+          width: (data as { width?: number }).width,
         } as object);
         canvas.requestRenderAll();
         return;
       }
+    }
+
+    if (isFabricTextType(data.type as string | undefined)) {
+      const text = typeof (data as { text?: unknown }).text === "string" ? (data as { text: string }).text : "";
+      const box = new Textbox(text, {
+        ...pickTransform(data),
+        width: (data as { width?: number }).width ?? 320,
+        fontSize: (data as { fontSize?: number }).fontSize,
+        fontFamily: (data as { fontFamily?: string }).fontFamily,
+        fill: (data as { fill?: unknown }).fill as string | undefined,
+      });
+      if (collabId) {
+        (box as FabricObject & { set: (k: string, v: string) => void }).set(COLLAB_ID_KEY, collabId);
+      }
+      canvas.add(box);
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+      return;
     }
 
     const copy = { ...data };
@@ -692,33 +711,38 @@ export function useRoomCollaboration({
       });
     };
 
-    const sendTextUpsert = (o: IText) => {
+    const sendTextUpsert = (o: FabricObject) => {
       if (isApplyingRemoteRef.current || isRestoringRef.current) {
         return;
       }
+      if (!isFabricTextType(o.type as string | undefined)) {
+        return;
+      }
       ensureCollabId(o);
+      const textObj = o as IText | Textbox;
       const d: Record<string, unknown> = {
-        type: "IText",
-        left: o.left,
-        top: o.top,
-        scaleX: o.scaleX,
-        scaleY: o.scaleY,
-        angle: o.angle,
-        opacity: o.opacity,
-        originX: o.originX,
-        originY: o.originY,
-        text: o.text,
-        fontSize: o.fontSize,
-        fontFamily: o.fontFamily,
-        fill: o.fill,
+        type: "textbox",
+        left: textObj.left,
+        top: textObj.top,
+        scaleX: textObj.scaleX,
+        scaleY: textObj.scaleY,
+        angle: textObj.angle,
+        opacity: textObj.opacity,
+        originX: textObj.originX,
+        originY: textObj.originY,
+        text: textObj.text,
+        width: (textObj as Textbox).width,
+        fontSize: textObj.fontSize,
+        fontFamily: textObj.fontFamily,
+        fill: textObj.fill,
       };
-      d[COLLAB_ID_KEY] = (o as FabricObject & { get: (k: string) => unknown }).get(COLLAB_ID_KEY);
+      d[COLLAB_ID_KEY] = (textObj as FabricObject & { get: (k: string) => unknown }).get(COLLAB_ID_KEY);
       sendAdd({
         type: "collab-object-add",
         roomId,
         senderId: clientIdRef.current,
         layer: "text",
-        object: wrapDrawEvent("add", "IText", d),
+        object: wrapDrawEvent("add", "textbox", d),
       });
     };
 
@@ -837,10 +861,10 @@ export function useRoomCollaboration({
       if (!t || isRestoringRef.current || isApplyingRemoteRef.current) {
         return;
       }
-      if (t.type !== "IText" && (t as IText & { get?: (k: string) => string }).get?.("type") !== "IText") {
+      if (!isFabricTextType(t.type as string | undefined)) {
         return;
       }
-      sendTextUpsert(t as IText);
+      sendTextUpsert(t);
     };
 
     const onTextModified = (e: { target: FabricObject | null }) => {
@@ -848,7 +872,7 @@ export function useRoomCollaboration({
       if (!t || isRestoringRef.current || isApplyingRemoteRef.current) {
         return;
       }
-      if (t.type !== "IText" && (t as IText & { get?: (k: string) => string }).get?.("type") !== "IText") {
+      if (!isFabricTextType(t.type as string | undefined)) {
         return;
       }
       if (textModTimer.current) {
@@ -856,7 +880,7 @@ export function useRoomCollaboration({
       }
       textModTimer.current = setTimeout(() => {
         textModTimer.current = null;
-        sendTextUpsert(t as IText);
+        sendTextUpsert(t);
       }, MODIFY_DEBOUNCE_MS);
     };
 

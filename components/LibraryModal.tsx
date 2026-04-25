@@ -16,7 +16,7 @@ export default function LibraryModal() {
   const { appearance } = useAppearance();
   const { dark, ivory, light } = getBoardTheme(appearance);
   const { isOpen, close } = useLibraryModal();
-  const { register } = useSavedWorksRefresh();
+  const { register, registerCreated } = useSavedWorksRefresh();
   const router = useRouter();
   const titleId = useId();
   const [rows, setRows] = useState<DrawingRow[]>([]);
@@ -50,6 +50,16 @@ export default function LibraryModal() {
     });
     return () => register(null);
   }, [loadDrawings, register]);
+
+  useEffect(() => {
+    registerCreated((row) => {
+      setRows((prev) => {
+        const withoutSame = prev.filter((x) => x.id !== row.id);
+        return [row, ...withoutSame];
+      });
+    });
+    return () => registerCreated(null);
+  }, [registerCreated]);
 
   useEffect(() => {
     if (!isOpen) {
