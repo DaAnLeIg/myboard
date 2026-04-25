@@ -493,8 +493,7 @@ export default function StudioConsole({
     if (!room) {
       return null;
     }
-    const u = new URL(`${window.location.origin}${window.location.pathname}`);
-    u.searchParams.set(ROOM_PARAM, room);
+    const u = new URL(`${window.location.origin}/room/${encodeURIComponent(room)}`);
     const cur = new URL(window.location.href);
     const docId = cur.searchParams.get("id") ?? cur.searchParams.get("drawing");
     if (docId?.trim()) {
@@ -838,29 +837,14 @@ export default function StudioConsole({
 
   /** Системное меню «Поделиться» (файл доски + текст), если доступно. */
   const runSystemShare = async () => {
-    if (onShareBoard) {
-      try {
-        const shared = await onShareBoard();
-        if (shared) {
-          return true;
-        }
-      } catch (e) {
-        console.warn("Native board share failed:", e);
-      }
-    }
     const url = buildRoomInviteUrl();
     if (!url || !isValidRoomInviteUrl(url)) {
       flashRefreshError();
       return false;
     }
-    const text = t("share.joinText", { url });
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
-        await navigator.share({
-          title: t("lib.shareSystemTitle"),
-          text,
-          url,
-        });
+        await navigator.share({ url });
         return true;
       } catch (e) {
         const name = e instanceof DOMException ? e.name : (e as Error)?.name;
@@ -870,12 +854,23 @@ export default function StudioConsole({
       }
     }
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(url);
       return true;
     } catch {
       flashRefreshError();
       return false;
     }
+  };
+
+  const openEmailInvite = () => {
+    const url = buildRoomInviteUrl();
+    if (!url || !isValidRoomInviteUrl(url)) {
+      flashRefreshError();
+      return;
+    }
+    const subject = encodeURIComponent("Приглашение в MyBoard");
+    const body = encodeURIComponent(`Присоединяйся к доске MyBoard:\n${url}`);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
 
   const toolbarContent = (
@@ -1662,6 +1657,9 @@ export default function StudioConsole({
                 className={shareNativeBtn}
               >
                 {t("share.native")}
+              </button>
+              <button type="button" onClick={openEmailInvite} className={shareDoneBtn}>
+                Email
               </button>
               <button type="button" onClick={() => setSharePanelOpen(false)} className={shareDoneBtn}>
                 {t("share.done")}
