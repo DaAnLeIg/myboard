@@ -77,7 +77,8 @@ type StudioConsoleProps = {
   maxRoomParticipants: number;
   fileInputRef: RefObject<HTMLInputElement | null>;
   boardChrome: BoardChrome;
-  boardOuterMaxClass: string;
+  /** Та же ширина, что и рабочее поле (только `w-…`). */
+  boardContentWidthClass: string;
   boardToolbarMaxClass: string;
   canUndo: boolean;
   onUndo: () => void;
@@ -114,7 +115,7 @@ export default function StudioConsole({
   maxRoomParticipants,
   fileInputRef,
   boardChrome,
-  boardOuterMaxClass,
+  boardContentWidthClass,
   boardToolbarMaxClass,
   canUndo,
   onUndo,
@@ -178,14 +179,15 @@ export default function StudioConsole({
         : "border-zinc-200/80 bg-zinc-50/50",
   );
 
-  /** Оболочка панели инструментов — по ширине чуть больше ряда иконок (w-fit + отступы). */
+  /** Плавающая панель инструментов — по содержимому, с тенью и кольцом. */
   const consoleToolsClusterClass = cn(
-    "inline-flex w-fit max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-2xl border px-2 py-1.5 shadow-sm",
+    "inline-flex w-fit max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-2xl border px-2 py-1.5",
+    "shadow-lg ring-1",
     dark
-      ? "border-zinc-600/60 bg-zinc-900/45"
+      ? "border-zinc-500/80 bg-zinc-800/95 shadow-zinc-950/40 ring-white/10"
       : ivory
-        ? "border-stone-300/75 bg-[#d8d2c2]/80"
-        : "border-zinc-200/90 bg-white/70",
+        ? "border-stone-400/80 bg-[#f0ece1]/95 shadow-stone-900/20 ring-stone-500/25"
+        : "border-zinc-200/90 bg-white/95 shadow-zinc-900/10 ring-zinc-300/80",
   );
 
   const toolButtonBase = cn(
@@ -994,8 +996,13 @@ export default function StudioConsole({
   return (
     <>
       <div className="fixed inset-x-0 top-0 z-[70] sm:hidden">
-        <div className="flex w-full min-w-0 flex-col gap-1.5 px-2.5 pt-2">
-        <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
+        <div
+          className={cn(
+            "mx-auto flex w-full min-w-0 flex-col gap-1.5 px-2.5 pt-2",
+            boardContentWidthClass,
+          )}
+        >
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-1.5">
           <Link
             href="/"
             className={cn(myBoardChipClass(), "min-h-9 shrink-0 px-2 text-xs")}
@@ -1064,8 +1071,6 @@ export default function StudioConsole({
           >
             <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
-        </div>
-        <div className="flex w-full min-w-0 items-center justify-center gap-1.5">
           <button
             type="button"
             disabled={!canUndo}
@@ -1076,10 +1081,17 @@ export default function StudioConsole({
           >
             <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
-          <div className="min-w-0 flex-1 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
-            {mainConsoleToolbar}
+        </div>
+        <div className="grid w-full min-w-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-x-1.5">
+          <div className="min-w-0" aria-hidden />
+          <div className="flex min-w-0 justify-center">
+            <div className="min-w-0 max-w-full overflow-x-auto pb-0.5 [scrollbar-width:thin]">
+              {mainConsoleToolbar}
+            </div>
           </div>
-          {participantStatusPill}
+          <div className="flex min-w-0 items-center justify-end">
+            {participantStatusPill}
+          </div>
         </div>
         </div>
       </div>
@@ -1158,12 +1170,12 @@ export default function StudioConsole({
       >
         <div
           className={cn(
-            "mx-auto flex w-full flex-col overflow-visible px-2.5 pb-2 pt-2",
-            boardOuterMaxClass,
+            "mx-auto flex w-full min-w-0 flex-col overflow-visible px-2.5 pb-2 pt-2",
+            boardContentWidthClass,
           )}
         >
-          <div className="grid w-full min-w-0 grid-cols-[1fr_auto_1fr] items-center gap-1.5">
-            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+          <div className="grid w-full min-w-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-x-2 gap-y-1.5">
+            <div className="flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1.5">
               <Link
                 href="/"
                 className={cn(
@@ -1236,8 +1248,6 @@ export default function StudioConsole({
               >
                 <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
               </button>
-            </div>
-            <div className="flex w-max min-w-0 max-w-full shrink-0 items-center justify-center justify-self-center gap-1.5">
               <button
                 type="button"
                 disabled={!canUndo}
@@ -1248,10 +1258,13 @@ export default function StudioConsole({
               >
                 <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
               </button>
+            </div>
+            <div className="z-10 flex min-w-0 max-w-full justify-center self-center">
               {mainConsoleToolbar}
+            </div>
+            <div className="flex w-full min-w-0 max-w-full items-center justify-end">
               {participantStatusPill}
             </div>
-            <div className="min-w-0" aria-hidden />
           </div>
         </div>
       </header>

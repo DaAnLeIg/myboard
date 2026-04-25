@@ -54,12 +54,15 @@ import StudioConsole, {
 
 /** Внешняя оболочка доски (~2/3 от 1200px), совпадает с колонкой консоли. */
 export const BOARD_OUTER_MAX_CLASS = "max-w-[800px]";
+/** Та же ширина, что у рабочего поля — для шапки/консоли. */
+export const BOARD_CONTENT_WIDTH_CLASS = "w-[min(61.33vw,653px)]";
 /**
- * Ширина рабочего поля: 2/3 от min(92vw, 980px) — визуально согласована с max-w 800
- * при типичных ширинах окна.
+ * Рабочее поле: та же ширина, что у консоли, плюс обводка.
  */
-export const BOARD_WIDTH_CLASS =
-  "relative w-[min(61.33vw,653px)] overflow-hidden rounded-md border shadow-sm";
+export const BOARD_WIDTH_CLASS = cn(
+  "relative overflow-hidden rounded-md border shadow-sm",
+  BOARD_CONTENT_WIDTH_CLASS,
+);
 
 type FabricWithEraser = typeof fabric & {
   EraserBrush?: new (canvas: fabric.Canvas) => fabric.BaseBrush;
@@ -1764,7 +1767,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         maxRoomParticipants={MAX_ROOM_PARTICIPANTS}
         fileInputRef={fileInputRef}
         boardChrome={boardChrome}
-        boardOuterMaxClass={BOARD_OUTER_MAX_CLASS}
+        boardContentWidthClass={BOARD_CONTENT_WIDTH_CLASS}
         boardToolbarMaxClass="w-fit max-w-full shrink-0"
         canUndo={canUndo}
         onUndo={() => {
