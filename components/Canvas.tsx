@@ -93,6 +93,7 @@ const DRAFT_GRACE_MS = 5 * 60_000;
 const DRAFT_ROOM_STORAGE_KEY = "myboard_draft_room";
 const DRAFT_EXPIRES_AT_KEY = "myboard_draft_expires_at";
 const DRAFT_ROW_ID_KEY = "myboard_draft_row_id";
+const TEXT_KEYBOARD_BOUND_ATTR = "data-myboard-text-keys";
 
 /** Ключ, чтобы не вешать на один IText два `changed` с размером. */
 const ITEXT_SIZE_LISTENER = "__myboardITextSizeRange";
@@ -139,6 +140,8 @@ type CanvasProps = {
   selectedDrawingId?: string | null;
 };
 
+type EditableTextObject = fabric.IText | fabric.Textbox;
+
 export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const boardContainerRef = useRef<HTMLDivElement | null>(null);
   const imgCanvasElementRef = useRef<HTMLCanvasElement | null>(null);
@@ -147,7 +150,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const imgCanvasRef = useRef<fabric.Canvas | null>(null);
   const textCanvasRef = useRef<fabric.Canvas | null>(null);
   const drawCanvasRef = useRef<fabric.Canvas | null>(null);
-  const lastTextObjectRef = useRef<fabric.IText | null>(null);
+  const lastTextObjectRef = useRef<EditableTextObject | null>(null);
   const lastInsertedImageRef = useRef<fabric.FabricImage | null>(null);
   const recalcDocumentHeightRef = useRef<(() => void) | null>(null);
   const requestSaveRef = useRef<(() => void) | null>(null);
@@ -159,7 +162,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const isImageDeleteModeRef = useRef(false);
   const pencilColorRef = useRef<string>(DEFAULT_PENCIL_COLOR);
   const textFontSizeRef = useRef<TextSizeOption>(DEFAULT_TEXT_SIZE);
-  const bindITextSizeOnTextChangeRef = useRef<(t: fabric.IText) => void | null>(null);
+  const bindITextSizeOnTextChangeRef = useRef<(t: EditableTextObject) => void | null>(null);
   const pendingImageStorageDeletesRef = useRef<Set<string>>(new Set());
   const networkOpDepthRef = useRef(0);
   const draftSaveInFlightRef = useRef(false);
@@ -218,13 +221,38 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     textInputLocaleRef.current = { bcp47: inputBcp47, rtl: isTextRtl };
   }, [inputBcp47, isTextRtl]);
 
-  const applyITextLocaleToObject = (o: fabric.IText) => {
+  const applyTextLocaleToObject = (o: EditableTextObject) => {
     requestAnimationFrame(() => {
       const ta = o.hiddenTextarea;
       if (ta) {
-        ta.setAttribute("lang", textInputLocaleRef.current.bcp47);
+        const sysLang = typeof navigator !== "undefined" ? navigator.language : "";
+        ta.setAttribute("lang", textInputLocaleRef.current.bcp47 || sysLang || "en");
         ta.setAttribute("dir", textInputLocaleRef.current.rtl ? "rtl" : "ltr");
+        ta.setAttribute("autocapitalize", "sentences");
+        ta.setAttribute("autocomplete", "off");
+        ta.setAttribute("autocorrect", "on");
+        ta.setAttribute("spellcheck", "true");
       }
+    });
+  };
+
+  const bindTextKeyboardShortcuts = (o: EditableTextObject) => {
+    requestAnimationFrame(() => {
+      const ta = o.hiddenTextarea;
+      if (!ta || ta.getAttribute(TEXT_KEYBOARD_BOUND_ATTR) === "1") {
+        return;
+      }
+      ta.setAttribute(TEXT_KEYBOARD_BOUND_ATTR, "1");
+      ta.addEventListener("keydown", (ev) => {
+        if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") {
+          ev.preventDefault();
+          o.selectAll();
+          return;
+        }
+        if (ev.key === "Enter" || ev.key === "Backspace" || ev.key === "Delete") {
+          // Native Textbox behavior handles multiline + deletion.
+        }
+      });
     });
   };
 
@@ -237,8 +265,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return;
     }
     for (const o of textCanvas.getObjects()) {
-      if (o instanceof fabric.IText) {
-        applyITextLocaleToObject(o);
+      if (o instanceof fabric.IText || o instanceof fabric.Textbox) {
+        applyTextLocaleToObject(o);
+        bindTextKeyboardShortcuts(o);
       }
     }
   }, [inputBcp47, isTextRtl, canvasesReady]);
@@ -591,7 +620,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     [buildDocumentSnapshot, bumpNetworkError, defaultWorkName],
   );
 
-  const setTextEditingVisuals = (text: fabric.IText) => {
+  const setTextEditingVisuals = (text: EditableTextObject) => {
     const fill = (typeof text.fill === "string" && text.fill ? text.fill : "#000000") as string;
     /** Без `fontSize`: размеры остаются по символам (`styles` / ref на объекте), иначе затирается микст-набор. */
     text.set({
@@ -612,7 +641,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     });
   };
 
-  const setTextIdleVisuals = (text: fabric.IText) => {
+  const setTextIdleVisuals = (text: EditableTextObject) => {
     const fill = (typeof text.fill === "string" && text.fill ? text.fill : "#000000") as string;
     text.set({
       fontFamily: "Arial",
@@ -629,7 +658,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
    * На каждом `changed` применяет `textFontSizeRef` к только что вставленному / заменённому
    * фрагменту (в т.ч. в середине абзаца), не трогая остальной текст.
    */
-  const bindITextSizeOnTextChange = (t: fabric.IText) => {
+  const bindITextSizeOnTextChange = (t: EditableTextObject) => {
     const rec = t as unknown as Record<string, boolean>;
     if (rec[ITEXT_SIZE_LISTENER]) {
       return;
@@ -643,7 +672,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         return;
       }
       const now = typeof t.text === "string" ? t.text : "";
-      const cursorAfter = t.selectionStart;
+      const cursorAfter = t.selectionStart ?? 0;
       const range = findFontSizeApplyRange(lastText, now, cursorAfter);
       if (range && range.end > range.start) {
         t.setSelectionStyles(
@@ -688,14 +717,15 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     if (!(active instanceof fabric.IText) && !(active instanceof fabric.Textbox)) {
       return;
     }
-    const t = active as fabric.IText;
-    const s = t.selectionStart;
-    const e = t.selectionEnd;
+    const t = active as EditableTextObject;
+    const s = t.selectionStart ?? 0;
+    const e = t.selectionEnd ?? s;
     if (e > s) {
       t.setSelectionStyles({ fontSize: size }, s, e);
     } else {
       t.setSelectionStyles({ fontSize: size }, s, s + 1);
     }
+    t.set("fontSize", next);
     t.initDimensions();
     if (t.isEditing) {
       setTextEditingVisuals(t);
@@ -715,7 +745,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     const textObjects = textCanvas
       .getObjects()
-      .filter((obj): obj is fabric.IText => obj instanceof fabric.IText);
+      .filter((obj): obj is EditableTextObject => obj instanceof fabric.IText || obj instanceof fabric.Textbox);
 
     textObjects.forEach((text) => {
       if (text.isEditing) {
@@ -828,7 +858,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         .filter((obj): obj is fabric.FabricImage => obj instanceof fabric.FabricImage);
       const texts = textCanvas
         .getObjects()
-        .filter((obj): obj is fabric.IText => obj instanceof fabric.IText);
+        .filter((obj): obj is EditableTextObject => obj instanceof fabric.IText || obj instanceof fabric.Textbox);
       for (const t of texts) {
         bindITextSizeOnTextChangeRef.current?.(t);
       }
@@ -1184,26 +1214,76 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       if (isImageDeleteModeRef.current) {
         return;
       }
-
-      if (event.target instanceof fabric.IText) {
+      if (activeToolRef.current !== "text") {
+        if (!event.target) {
+          clearTextEditingVisuals();
+          queueSaveDocument();
+        }
+        return;
+      }
+      if (event.target instanceof fabric.IText || event.target instanceof fabric.Textbox) {
         lastTextObjectRef.current = event.target;
         setTextEditingVisuals(event.target);
         textCanvas.setActiveObject(event.target);
         event.target.enterEditing();
-        event.target.selectAll();
         event.target.hiddenTextarea?.focus();
-        applyITextLocaleToObject(event.target);
+        applyTextLocaleToObject(event.target);
+        bindTextKeyboardShortcuts(event.target);
         textCanvas.requestRenderAll();
         queueSaveDocument();
         return;
       }
+      clearTextEditingVisuals();
+      const p = textCanvas.getScenePoint(event.e);
+      const maxWidth = Math.max(180, Math.floor(textCanvas.getWidth() * 0.8));
+      const size = textFontSizeRef.current;
+      const newText = new fabric.Textbox("", {
+        left: Math.max(16, p.x),
+        top: Math.max(16, p.y),
+        width: maxWidth,
+        fontFamily: "Arial",
+        fontSize: size,
+        fill: "#000000",
+        editable: true,
+        backgroundColor: "rgba(255,255,255,0.25)",
+        padding: TEXT_HORIZONTAL_PADDING,
+        borderColor: "rgba(255, 80, 80, 0.35)",
+        editingBorderColor: "rgba(255, 80, 80, 0.55)",
+        cursorColor: "#000000",
+        selectionColor: "rgba(255, 80, 80, 0.15)",
+      });
+      setTextIdleVisuals(newText);
+      bindITextSizeOnTextChange(newText);
+      newText.on("editing:entered", () => {
+        setTextEditingVisuals(newText);
+        applyTextLocaleToObject(newText);
+        bindTextKeyboardShortcuts(newText);
+        textCanvas.requestRenderAll();
+        recalcDocumentHeightRef.current?.();
+      });
+      newText.on("editing:exited", () => {
+        setTextIdleVisuals(newText);
+        textCanvas.requestRenderAll();
+        recalcDocumentHeightRef.current?.();
+        requestSaveRef.current?.();
+      });
+      lastTextObjectRef.current = newText;
+      textCanvas.add(newText);
+      textCanvas.setActiveObject(newText);
+      newText.enterEditing();
+      newText.hiddenTextarea?.focus();
+      applyTextLocaleToObject(newText);
+      bindTextKeyboardShortcuts(newText);
+      textCanvas.requestRenderAll();
+      recalcDocumentHeightRef.current?.();
+      queueSaveDocument();
     };
 
     drawCanvas.on("mouse:down", handleTextPointer);
     textCanvas.on("mouse:down", handleTextPointer);
 
     textCanvas.on("mouse:dblclick", (event) => {
-      if (!(event.target instanceof fabric.IText)) {
+      if (!(event.target instanceof fabric.IText) && !(event.target instanceof fabric.Textbox)) {
         return;
       }
       lastTextObjectRef.current = event.target;
@@ -1212,7 +1292,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       event.target.enterEditing();
       event.target.selectAll();
       event.target.hiddenTextarea?.focus();
-      applyITextLocaleToObject(event.target);
+      applyTextLocaleToObject(event.target);
+      bindTextKeyboardShortcuts(event.target);
       textCanvas.requestRenderAll();
       queueSaveDocument();
     });
@@ -1638,9 +1719,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           ? (existingText.top ?? baseTop) + existingText.getScaledHeight() + 20
           : baseTop;
 
-      const newText = new fabric.IText(" ", {
+      const newText = new fabric.Textbox("", {
         left: baseLeft,
         top: nextTop,
+        width: Math.max(180, Math.floor(canvasWidth * 0.8)),
         fontFamily: "Arial",
         fontSize: size,
         fill: "#000000",
@@ -1655,7 +1737,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       setTextIdleVisuals(newText);
       newText.on("editing:entered", () => {
         setTextEditingVisuals(newText);
-        applyITextLocaleToObject(newText);
+        applyTextLocaleToObject(newText);
+        bindTextKeyboardShortcuts(newText);
         textCanvas.requestRenderAll();
         recalcDocumentHeightRef.current?.();
         requestSaveRef.current?.();
@@ -1672,7 +1755,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       textCanvas.add(newText);
       textCanvas.setActiveObject(newText);
       newText.enterEditing();
-      applyITextLocaleToObject(newText);
+      newText.hiddenTextarea?.focus();
+      applyTextLocaleToObject(newText);
+      bindTextKeyboardShortcuts(newText);
       textCanvas.requestRenderAll();
       recalcDocumentHeightRef.current?.();
       requestSaveRef.current?.();
@@ -1697,7 +1782,11 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     didManualSaveRef.current = true;
     try {
       const content = await buildDocumentSnapshot(imgCanvas, textCanvas, drawCanvas);
-      const previewDataUrl = drawCanvas.toDataURL({ format: "png", quality: 0.1 });
+      const previewDataUrl = drawCanvas.toDataURL({
+        format: "png",
+        quality: 0.1,
+        multiplier: 1,
+      });
       const roomIdForSave =
         (typeof collabRoomId === "string" && collabRoomId.trim()) ||
         `saved:${crypto.randomUUID()}`;

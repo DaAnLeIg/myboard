@@ -505,8 +505,8 @@ export default function StudioConsole({
   const isValidRoomInviteUrl = (url: string): boolean => {
     try {
       const u = new URL(url);
-      const r = u.searchParams.get(ROOM_PARAM)?.trim();
-      return Boolean(r && r === collabRoomId.trim());
+      const pathRoom = u.pathname.startsWith("/room/") ? decodeURIComponent(u.pathname.slice(6)) : "";
+      return Boolean(pathRoom && pathRoom === collabRoomId.trim());
     } catch {
       return false;
     }
