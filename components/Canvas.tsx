@@ -624,11 +624,46 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   bindITextSizeOnTextChangeRef.current = bindITextSizeOnTextChange;
 
   /**
-   * Размер в панели: ref для след. ввода; фактическое применение — в `bindITextSizeOnTextChange` + `changed`.
+   * Смена кегля через `setSelectionStyles` (Fabric): выделение — на весь range;
+   * свернутый курсор — стиль в точке [s, s+1) для след. ввода. Затем `initDimensions` и сохранение
+   * полного JSON объекта (persist + `changed` для согласованности с Realtime/Supabase).
    */
-  const applyTextFontSizeForSubsequentTyping = (px: TextSizeOption) => {
-    setTextFontSize(px);
-    textFontSizeRef.current = px;
+  const updateFontSize = (size: number) => {
+    const next: TextSizeOption =
+      size === 10 || size === 14 || size === 18
+        ? size
+        : ([10, 14, 18] as const).reduce((a, b) => (Math.abs(b - size) < Math.abs(a - size) ? b : a));
+    setTextFontSize(next);
+    textFontSizeRef.current = next;
+
+    const textCanvas = textCanvasRef.current;
+    if (!textCanvas) {
+      return;
+    }
+    const active = textCanvas.getActiveObject();
+    if (!active) {
+      return;
+    }
+    if (!(active instanceof fabric.IText) && !(active instanceof fabric.Textbox)) {
+      return;
+    }
+    const t = active as fabric.IText;
+    const s = t.selectionStart;
+    const e = t.selectionEnd;
+    if (e > s) {
+      t.setSelectionStyles({ fontSize: size }, s, e);
+    } else {
+      t.setSelectionStyles({ fontSize: size }, s, s + 1);
+    }
+    t.initDimensions();
+    if (t.isEditing) {
+      setTextEditingVisuals(t);
+    }
+    void persistFabricObject("text", t);
+    textCanvas.requestRenderAll();
+    recalcDocumentHeightRef.current?.();
+    requestSaveRef.current?.();
+    t.fire("changed" as "changed" & string);
   };
 
   const clearTextEditingVisuals = () => {
@@ -1864,7 +1899,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           setActiveTool("eraser");
         }}
         onTextSize={(px) => {
-          applyTextFontSizeForSubsequentTyping(px);
+          updateFontSize(px);
         }}
         onAddText={addText}
         onAddImage={() => {
