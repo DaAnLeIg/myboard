@@ -33,8 +33,13 @@ import { ColorPicker } from "./ui/color-picker";
 
 const ICON = 1.75 as const;
 
-/** Высота фиксированной консоли (одна строка на десктопе). */
-export const STUDIO_CONSOLE_HEIGHT_PX = 56;
+/**
+ * Вертикальный отступ контента под плавающей консолью: `top-4` (16) + панель (~56) + запас.
+ * @deprecated Семантически: используйте STUDIO_CONSOLE_DESKTOP_FLOAT_PX
+ */
+export const STUDIO_CONSOLE_HEIGHT_PX = 80;
+/** Отступ под плавающую `fixed` консоль (top-4 + высота пилюли + запас). */
+export const STUDIO_CONSOLE_DESKTOP_FLOAT_PX = STUDIO_CONSOLE_HEIGHT_PX;
 /** Отступ контента под моб. шапку (две строки: навигация + панель инструментов). */
 export const STUDIO_CONSOLE_MOBILE_HEADER_PX = 104;
 /** @deprecated Используйте STUDIO_CONSOLE_HEIGHT_PX */
@@ -851,12 +856,9 @@ export default function StudioConsole({
     </>
   );
 
-  const mainConsoleToolbar = (
-    <div
-      className={cn(consoleToolsClusterClass, "shrink-0", boardToolbarMaxClass)}
-      role="toolbar"
-      aria-label={t("header.mainToolbar")}
-    >
+  /** Только группы кисти/текста/картинки (без внешней «капсулы»). */
+  const mainConsoleToolGroups = (
+    <div className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
       <div className={innerGroupClass}>
         {pencilWidthStripeControl}
         <span
@@ -991,6 +993,36 @@ export default function StudioConsole({
         </button>
       </div>
     </div>
+  );
+
+  const mainConsoleToolbar = (
+    <div
+      className={cn(consoleToolsClusterClass, "shrink-0", boardToolbarMaxClass)}
+      role="toolbar"
+      aria-label={t("header.mainToolbar")}
+    >
+      {mainConsoleToolGroups}
+    </div>
+  );
+
+  const desktopToolsBorder = dark
+    ? "border-zinc-500/60"
+    : ivory
+      ? "border-stone-400/60"
+      : "border-zinc-200/80";
+
+  /** Плавающая консоль: fixed, по центру сверху; ширина = boardContentWidthClass (как у холста). */
+  const floatPillClass = cn(
+    "hidden sm:flex",
+    "fixed top-[1rem] left-1/2 z-50 -translate-x-1/2",
+    "min-h-11 max-w-full items-center justify-center",
+    "rounded-full border shadow-lg shadow-black/5 backdrop-blur-md",
+    boardContentWidthClass,
+    dark
+      ? "border-zinc-600/80 bg-zinc-900/75 text-zinc-100 shadow-zinc-950/30"
+      : ivory
+        ? "border-stone-300/80 bg-[#f4efe4]/85 text-stone-900 shadow-stone-900/15"
+        : "border-zinc-200/80 bg-white/75 text-zinc-900 shadow-zinc-900/10",
   );
 
   return (
@@ -1161,21 +1193,55 @@ export default function StudioConsole({
         </button>
       </div>
 
-      <header
-        className={cn(
-          "fixed inset-x-0 top-0 z-[70] hidden backdrop-blur sm:block",
-          ivory ? "border-b border-stone-200/80 bg-[#ebe6d8]/95" : dark ? "border-b border-zinc-800 bg-zinc-900/90" : "bg-zinc-100/90",
-        )}
-        aria-label={t("header.aria")}
-      >
-        <div
-          className={cn(
-            "mx-auto flex w-full min-w-0 flex-col overflow-visible px-2.5 pb-2 pt-2",
-            boardContentWidthClass,
-          )}
-        >
-          <div className="grid w-full min-w-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-x-2 gap-y-1.5">
-            <div className="flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1.5">
+      <div className={floatPillClass} role="region" aria-label={t("header.aria")}>
+        <div className="flex w-full min-w-0 max-w-full items-center justify-between gap-2 px-3 py-2 sm:px-4">
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1.5">
+            <LanguagePicker
+              className={cn(`${navLinkClass(false)} h-8 w-8 gap-0 p-0 sm:h-9 sm:w-9`)}
+              labelAria={t("locale.title")}
+              labelTitle={t("locale.title")}
+              dark={dark}
+              ivory={ivory}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void onNewDocument?.();
+              }}
+              className={`${navLinkClass(false)} h-8 w-8 gap-0 p-0 sm:h-9 sm:w-9`}
+              title={t("nav.newDoc")}
+              aria-label={t("nav.newDoc")}
+            >
+              <Plus className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={ICON} aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => toggleNavMore(e.currentTarget)}
+              className={`${navLinkClass(false)} h-8 w-8 gap-0 p-0 sm:h-9 sm:w-9`}
+              title={t("nav.more")}
+              aria-label={t("nav.more")}
+              aria-expanded={navMoreOpen}
+              aria-haspopup="menu"
+            >
+              <List className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={openLibrary}
+              className={`${navLinkClass(isLibrary)} h-8 w-8 gap-0 p-0 sm:h-9 sm:w-9`}
+              title={t("nav.library")}
+              aria-label={t("nav.library")}
+              aria-pressed={isLibrary}
+            >
+              <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+            </button>
+          </div>
+          <div className="flex min-w-0 min-h-0 flex-1 items-center justify-end pl-1 sm:pl-2">
+            {/*
+              flex-row-reverse: первый в DOM = край справа. Порядок: Счётчик → MyBoard → блок с иконками/undo.
+            */}
+            <div className="flex min-w-0 max-w-full min-h-0 flex-row-reverse flex-wrap items-center justify-end gap-1.5 sm:gap-3">
+              {participantStatusPill}
               <Link
                 href="/"
                 className={cn(
@@ -1209,65 +1275,40 @@ export default function StudioConsole({
               >
                 {t("nav.myBoard")}
               </Link>
-              <LanguagePicker
-                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-                labelAria={t("locale.title")}
-                labelTitle={t("locale.title")}
-                dark={dark}
-                ivory={ivory}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  void onNewDocument?.();
-                }}
-                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-                title={t("nav.newDoc")}
-                aria-label={t("nav.newDoc")}
+              <div
+                className={cn(
+                  "flex min-w-0 max-w-full items-center gap-1.5 border-r",
+                  desktopToolsBorder,
+                  "pr-1.5 sm:pr-4",
+                )}
+                role="toolbar"
+                aria-label={t("header.mainToolbar")}
               >
-                <Plus className="h-5 w-5" strokeWidth={ICON} aria-hidden />
-              </button>
-              <button
-                type="button"
-                onClick={(e) => toggleNavMore(e.currentTarget)}
-                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
-                title={t("nav.more")}
-                aria-label={t("nav.more")}
-                aria-expanded={navMoreOpen}
-                aria-haspopup="menu"
-              >
-                <List className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-              </button>
-              <button
-                type="button"
-                onClick={openLibrary}
-                className={`${navLinkClass(isLibrary)} h-9 w-9 gap-0 p-0 shadow-md`}
-                title={t("nav.library")}
-                aria-label={t("nav.library")}
-                aria-pressed={isLibrary}
-              >
-                <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-              </button>
-              <button
-                type="button"
-                disabled={!canUndo}
-                onClick={() => onUndo()}
-                className={`${navLinkClass(false)} h-9 w-9 shrink-0 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
-                title={t("nav.undo")}
-                aria-label={t("nav.undo")}
-              >
-                <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-              </button>
-            </div>
-            <div className="z-10 flex min-w-0 max-w-full justify-center self-center">
-              {mainConsoleToolbar}
-            </div>
-            <div className="flex w-full min-w-0 max-w-full items-center justify-end">
-              {participantStatusPill}
+                <button
+                  type="button"
+                  disabled={!canUndo}
+                  onClick={() => onUndo()}
+                  className={cn(
+                    toolButtonBase,
+                    "h-6 w-6 sm:h-7 sm:w-7",
+                    "shrink-0 disabled:cursor-not-allowed",
+                    canUndo
+                      ? toolButtonInactive
+                      : cn("opacity-40", dark ? "text-zinc-500" : ivory ? "text-stone-500" : "text-zinc-400"),
+                  )}
+                  title={t("nav.undo")}
+                  aria-label={t("nav.undo")}
+                >
+                  <Undo2 className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
+                </button>
+                <div className="min-w-0 max-w-full overflow-x-auto [scrollbar-width:thin] sm:max-w-[min(42vw,320px)]">
+                  {mainConsoleToolGroups}
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
       {navMoreOpen && navMorePos ? (
         <div
