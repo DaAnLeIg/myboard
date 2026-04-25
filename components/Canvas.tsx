@@ -510,10 +510,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
   const setTextEditingVisuals = (text: fabric.IText) => {
     const fill = (typeof text.fill === "string" && text.fill ? text.fill : "#000000") as string;
-    const fs = typeof text.fontSize === "number" ? text.fontSize : textFontSizeRef.current;
+    /** Без `fontSize`: размеры остаются по символам (`styles` / ref на объекте), иначе затирается микст-набор. */
     text.set({
       fontFamily: "Arial",
-      fontSize: fs,
       fill,
       backgroundColor: "rgba(255,255,255,0.25)",
       padding: TEXT_HORIZONTAL_PADDING,
@@ -532,10 +531,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
   const setTextIdleVisuals = (text: fabric.IText) => {
     const fill = (typeof text.fill === "string" && text.fill ? text.fill : "#000000") as string;
-    const fs = typeof text.fontSize === "number" ? text.fontSize : textFontSizeRef.current;
     text.set({
       fontFamily: "Arial",
-      fontSize: fs,
       fill,
       backgroundColor: "rgba(255,255,255,0.25)",
       padding: TEXT_HORIZONTAL_PADDING,
@@ -545,7 +542,11 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     });
   };
 
-  /** Размер в панели — для новых блоков и дальнейшего набора; уже введённые блоки не масштабируем. */
+  /**
+   * Размер из панели: только ref для новых блоков; для правки существующего IText
+   * — через per-char `setSelectionStyles` в точке вставки (конец строки / пусто),
+   * без `set('fontSize')` на весь объект и без перерисовки уже введённых глифов.
+   */
   const applyTextFontSizeForSubsequentTyping = (px: TextSizeOption) => {
     const textCanvas = textCanvasRef.current;
     if (!textCanvas) {
@@ -554,8 +555,19 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     setTextFontSize(px);
     textFontSizeRef.current = px;
     const active = textCanvas.getActiveObject();
-    if (active instanceof fabric.IText && active.isEditing) {
-      active.set("fontSize", px);
+    if (!(active instanceof fabric.IText) || !active.isEditing) {
+      return;
+    }
+    const s = active.selectionStart;
+    const e = active.selectionEnd;
+    const strLen = typeof active.text === "string" ? active.text.length : 0;
+    let applied = false;
+    if (s === e && s === strLen) {
+      active.setSelectionStyles({ fontSize: px }, s, s + 1);
+      active.initDimensions();
+      applied = true;
+    }
+    if (applied) {
       setTextEditingVisuals(active);
       textCanvas.requestRenderAll();
       recalcDocumentHeightRef.current?.();
