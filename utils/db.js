@@ -19,6 +19,11 @@ export async function saveCanvasObjectsFromSnapshot(snapshot) {
   const imgObjects = snapshot?.imgLayer?.objects ?? [];
   const textObjects = snapshot?.textLayer?.objects ?? [];
   const drawObjects = snapshot?.drawLayer?.objects ?? [];
+  console.log("[save:canvas] saveCanvasObjectsFromSnapshot (myboard_dexie legacy) object counts", {
+    img: imgObjects.length,
+    text: textObjects.length,
+    draw: drawObjects.length,
+  });
   const now = Date.now();
 
   const records = [

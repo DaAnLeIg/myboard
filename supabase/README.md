@@ -4,6 +4,9 @@
 
 1. `supabase/migrations/20260424_drawings_owner_rls_and_draft_cleanup.sql` (drawings + `owner_token`)
 2. `supabase/migrations/20260425_canvas_objects_rls_by_drawing.sql` (RLS on `canvas_objects` by `drawing_id` + same `x-owner-token` as parent `drawings` row)
+3. `supabase/migrations/20260426_canvas_objects_ensure_drawing_id.sql` (колонка `drawing_id`, если таблицу ещё создали вручную)
+
+В `canvas_objects` поле `drawing_id` = `public.drawings.id` (из URL: `?id` / `?drawing`). Параметр `?room=` (коллаборация) **не** записывайте в `drawing_id`.
 
 For **Realtime** on `canvas_objects`, if not already added:
 

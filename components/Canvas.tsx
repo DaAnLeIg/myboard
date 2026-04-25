@@ -20,6 +20,11 @@ import {
   prepareImageLayerForSnapshot,
   SNAPSHOT_IMAGE_PROPS,
 } from "../utils/canvasLogic";
+import {
+  buildSnapshotFromObjectRows,
+  normalizeSnapshotByFabricType,
+} from "../utils/snapshotLayerRouting";
+import { resolveCanvasObjectDrawingId } from "../utils/resolveCanvasObjectDrawingId";
 import { removeStorageObjects, STORAGE_PATH_KEY } from "../utils/imageStorage";
 import {
   getLocalCanvasSnapshot,
@@ -34,6 +39,9 @@ import { v4 as uuidv4 } from "uuid";
 import {
   pushChanges,
   pushChangesDebounced,
+  fetchCanvasObjectsFromSupabase,
+  getLocalCanvasObjectsByDrawingId,
+  reconcileLocalCanvasObjectsFromSnapshot,
   replaceDrawingCanvasObjectsLocal,
   supabaseRowToCanvasObject,
   upsertCanvasObjectLocal,
@@ -189,6 +197,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       drawCanvasRef,
       boardContainerRef,
     });
+
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const idFromUrl = searchParams.get("id") ?? searchParams.get("drawing");
+  const drawingIdToLoad = selectedDrawingId ?? idFromUrl ?? null;
+  const canvasObjectsDrawingId = resolveCanvasObjectDrawingId(selectedDrawingId, idFromUrl);
 
   useEffect(() => {
     const check = () => setIsMobileViewport(window.matchMedia("(max-width: 639px)").matches);
@@ -349,13 +363,32 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     }
   }, []);
 
-  const persistToDexie = useCallback(async (snapshot: CanvasSnapshot) => {
-    try {
-      await saveCanvasObjectsFromSnapshot(snapshot);
-    } catch (e) {
-      console.warn("Dexie persist failed:", e);
-    }
-  }, []);
+  const persistToDexie = useCallback(
+    async (snapshot: CanvasSnapshot, opts?: { myBoardReconcile?: boolean }) => {
+      const myBoard = opts?.myBoardReconcile !== false;
+      try {
+        console.log("[save:canvas] persistToDexie: legacy myboard_dexie snapshot");
+        await saveCanvasObjectsFromSnapshot(snapshot);
+      } catch (e) {
+        console.warn("Dexie persist failed:", e);
+      }
+      if (!myBoard) {
+        console.log(
+          "[save:canvas] persistToDexie: MyBoardDB reconcile skipped (e.g. post-load from server)",
+        );
+        return;
+      }
+      const drawingId = canvasObjectsDrawingId;
+      try {
+        console.log("[save:canvas] persistToDexie: MyBoardDB + pending from snapshot", { drawingId });
+        await reconcileLocalCanvasObjectsFromSnapshot(drawingId, snapshot);
+        pushChangesDebounced();
+      } catch (e) {
+        console.warn("MyBoardDB reconcile failed:", e);
+      }
+    },
+    [canvasObjectsDrawingId],
+  );
 
   const persistFabricObject = useCallback(
     async (layer: "img" | "text" | "draw", obj: fabric.Object | null | undefined) => {
@@ -380,27 +413,32 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
             ]) as Record<string, unknown>)
           : (obj.toObject([OBJECT_UPDATED_AT_KEY, "mbCollabId"]) as Record<string, unknown>);
 
-      const drawingIdFromUrl =
-        typeof window !== "undefined"
-          ? new URL(window.location.href).searchParams.get("id") ??
-            new URL(window.location.href).searchParams.get("drawing")
-          : null;
-      const drawingId = selectedDrawingId ?? drawingIdFromUrl ?? SUPABASE_DOCUMENT_ID;
+      const drawingId = canvasObjectsDrawingId;
       const rowId = `${drawingId}:${objectId}`;
       const t = Date.now();
 
-      await upsertCanvasObjectLocal({
-        id: rowId,
-        drawing_id: drawingId,
-        object_id: objectId,
+      console.log("[save:canvas] persistFabricObject", {
         layer,
-        fabric_json: serialized,
-        last_updated: t,
-        sync_status: "pending",
+        rowId,
+        objectId,
+        drawingId,
       });
+      await upsertCanvasObjectLocal(
+        {
+          id: rowId,
+          drawing_id: drawingId,
+          object_id: objectId,
+          layer,
+          fabric_json: serialized,
+          last_updated: t,
+          sync_status: "pending",
+        },
+        "persistFabricObject",
+      );
+      console.log("[save:canvas] persistFabricObject: Dexie put done, scheduling push");
       pushChangesDebounced();
     },
-    [selectedDrawingId],
+    [canvasObjectsDrawingId],
   );
 
   const syncOfflineChanges = useCallback(async () => {
@@ -687,15 +725,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     textCanvas.requestRenderAll();
   };
 
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const idFromUrl = searchParams.get("id") ?? searchParams.get("drawing");
-  const drawingIdToLoad = selectedDrawingId ?? idFromUrl ?? null;
-  const canvasObjectDrawingId = (selectedDrawingId ?? idFromUrl) ?? SUPABASE_DOCUMENT_ID;
-
   useOfflineSync({
     enabled: true,
-    syncDrawingId: canvasObjectDrawingId,
+    syncDrawingId: canvasObjectsDrawingId,
     canvasesReady,
     isRestoringRef: isLoadingDrawingRef,
     imgCanvasRef,
@@ -715,6 +747,13 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       if (!imgCanvas || !textCanvas || !drawCanvas) {
         return;
       }
+
+      imgCanvas.clear();
+      textCanvas.clear();
+      drawCanvas.clear();
+      imgCanvas.backgroundColor = "#ffffff";
+      textCanvas.backgroundColor = "rgba(0,0,0,0)";
+      drawCanvas.backgroundColor = "rgba(0,0,0,0)";
 
       const snapshot = data;
       const currentWidth = drawCanvas.getWidth();
@@ -1293,13 +1332,28 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         if (isCancelled) {
           return;
         }
-        const snapshot = drawing.content;
-        if (!snapshot) {
+        const base = drawing.content;
+        if (!base) {
           return;
         }
+        let objectRows = await getLocalCanvasObjectsByDrawingId(drawingIdToLoad);
+        if (objectRows.length === 0 && typeof navigator !== "undefined" && navigator.onLine) {
+          try {
+            objectRows = await fetchCanvasObjectsFromSupabase(drawingIdToLoad);
+          } catch (e) {
+            console.warn("canvas_objects: fetch for load failed, using drawings.content", e);
+          }
+        }
+        const snapshot =
+          objectRows.length > 0
+            ? buildSnapshotFromObjectRows(objectRows, base)
+            : normalizeSnapshotByFabricType(base);
         await loadDrawing(snapshot, { isCancelled: () => isCancelled });
+        if (objectRows.length > 0) {
+          await replaceDrawingCanvasObjectsLocal(drawingIdToLoad, objectRows);
+        }
         await persistSnapshotLocally(snapshot, { pendingSync: false });
-        await persistToDexie(snapshot);
+        await persistToDexie(snapshot, { myBoardReconcile: false });
       } catch (error) {
         console.warn("Failed to load drawing:", error);
         bumpNetworkError();
