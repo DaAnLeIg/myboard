@@ -194,7 +194,20 @@ const ENTRIES: Entry[] = [
   ],
   [
     "header.mainToolbar",
-    L("Инструменты", "Tools", "Nástroje", "Herramientas", "Eszközök", "Werkzeuge", "औज़ार", "الأدوات"),
+    L("Инструменты", "Tools", "Nástroje", "Herramientas", "Eszközök", "Werkzeuge", "औज़ار", "الأدوات"),
+  ],
+  [
+    "toolsPanel.dragHandle",
+    L(
+      "Перемещение панели инструментов",
+      "Drag to move the tools panel",
+      "Přesun panelu",
+      "Arrastrar panel",
+      "A panel húzása",
+      "Panel ziehen",
+      "औज़ार पैनल खींचें",
+      "سحب لتحريك اللوحة",
+    ),
   ],
   [
     "nav.ariaMore",

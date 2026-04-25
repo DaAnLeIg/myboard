@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as fabric from "fabric";
 import { supabase } from "../utils/supabaseClient";
@@ -1750,7 +1750,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         "relative h-screen overflow-hidden",
         appearance.comfort ? "bg-[#eae5d6]" : appearance.inverted ? "bg-zinc-950" : "bg-gray-50",
       )}
-      style={{ "--canvas-width": "min(61.33vw, 653px)" } as CSSProperties}
     >
       <StudioConsole
         activeTool={activeTool}

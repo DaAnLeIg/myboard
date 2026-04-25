@@ -21,6 +21,7 @@ import {
   Type,
   Undo2,
   X,
+  GripHorizontal,
 } from "lucide-react";
 import { useLocale } from "../contexts/LocaleContext";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
@@ -32,16 +33,15 @@ import { Slider } from "./ui/slider";
 import { ColorPicker } from "./ui/color-picker";
 
 const ICON = 1.75 as const;
+const FLOATING_TOOLS_POS_KEY = "myboard_floating_tools_v1";
 
+/** Высота фиксированной консоли (одна строка на десктопе). */
+export const STUDIO_CONSOLE_HEIGHT_PX = 56;
 /**
- * Вертикальный отступ контента под плавающей консолью: `top-4` (16) + панель (~56) + запас.
- * @deprecated Семантически: используйте STUDIO_CONSOLE_DESKTOP_FLOAT_PX
+ * Отступ под моб. шапку: одна полоса (MyBoard, иконки, отмена) + счётчик;
+ * панель инструментов вынесена в плавающий блок.
  */
-export const STUDIO_CONSOLE_HEIGHT_PX = 80;
-/** Отступ под плавающую `fixed` консоль (top-4 + высота пилюли + запас). */
-export const STUDIO_CONSOLE_DESKTOP_FLOAT_PX = STUDIO_CONSOLE_HEIGHT_PX;
-/** Отступ контента под моб. шапку (две строки: навигация + панель инструментов). */
-export const STUDIO_CONSOLE_MOBILE_HEADER_PX = 104;
+export const STUDIO_CONSOLE_MOBILE_HEADER_PX = 64;
 /** @deprecated Используйте STUDIO_CONSOLE_HEIGHT_PX */
 export const TOOLBAR_HEIGHT_PX = STUDIO_CONSOLE_HEIGHT_PX;
 
@@ -184,7 +184,7 @@ export default function StudioConsole({
         : "border-zinc-200/80 bg-zinc-50/50",
   );
 
-  /** Плавающая панель инструментов — по содержимому, с тенью и кольцом. */
+  /** Палитра/иконки в моб. FAB: прежняя капсула. */
   const consoleToolsClusterClass = cn(
     "inline-flex w-fit max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-2xl border px-2 py-1.5",
     "shadow-lg ring-1",
@@ -193,6 +193,23 @@ export default function StudioConsole({
       : ivory
         ? "border-stone-400/80 bg-[#f0ece1]/95 shadow-stone-900/20 ring-stone-500/25"
         : "border-zinc-200/90 bg-white/95 shadow-zinc-900/10 ring-zinc-300/80",
+  );
+  /** Оболочка переносимой панели (с ручкой сверху). */
+  const toolsFloatShellClass = cn(
+    "flex w-max min-w-0 max-w-full flex-col overflow-hidden p-0",
+    "max-w-[min(100vw-1rem,653px)]",
+    "rounded-2xl border shadow-lg ring-1",
+    dark
+      ? "border-zinc-500/80 bg-zinc-800/95 shadow-zinc-950/50 ring-white/10"
+      : ivory
+        ? "border-stone-400/80 bg-[#f0ece1]/95 shadow-stone-900/25 ring-stone-500/30"
+        : "border-zinc-200/90 bg-white/98 shadow-zinc-900/15 ring-zinc-300/80",
+  );
+  const toolsFloatHandleClass = cn(
+    "flex h-5 w-full shrink-0 touch-none select-none items-center justify-center border-b",
+    "cursor-grab border-black/10 active:cursor-grabbing",
+    "dark:border-white/15",
+    dark ? "bg-zinc-800" : ivory ? "bg-[#e8e2d4]/95" : "bg-zinc-100/90",
   );
 
   const toolButtonBase = cn(
@@ -509,6 +526,92 @@ export default function StudioConsole({
   const dragActiveRef = useRef(false);
   const dragPointerIdRef = useRef<number | null>(null);
   const dragStartRef = useRef({ x: 0, y: 0, baseX: 16, baseY: 16 });
+  const [toolsPanelPos, setToolsPanelPos] = useState({ x: 16, y: 70 });
+  const toolsPanelRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(FLOATING_TOOLS_POS_KEY);
+      if (raw) {
+        const p = JSON.parse(raw) as { x?: unknown; y?: unknown };
+        if (
+          typeof p.x === "number" &&
+          typeof p.y === "number" &&
+          !Number.isNaN(p.x) &&
+          !Number.isNaN(p.y)
+        ) {
+          setToolsPanelPos({ x: p.x, y: p.y });
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setToolsPanelPos({
+      x: Math.max(8, (window.innerWidth - 420) / 2),
+      y: STUDIO_CONSOLE_HEIGHT_PX + 6,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const onResize = () => {
+      setToolsPanelPos((p) => {
+        const el = toolsPanelRef.current;
+        const dw = el?.offsetWidth ?? 360;
+        const dh = el?.offsetHeight ?? 72;
+        return {
+          x: Math.max(8, Math.min(window.innerWidth - dw - 8, p.x)),
+          y: Math.max(8, Math.min(window.innerHeight - dh - 8, p.y)),
+        };
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const onToolsPanelHandlePointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    if (e.button !== 0) {
+      return;
+    }
+    const origX = toolsPanelPos.x;
+    const origY = toolsPanelPos.y;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const onMove = (ev: PointerEvent) => {
+      const el = toolsPanelRef.current;
+      const dw = el?.offsetWidth ?? 360;
+      const dh = el?.offsetHeight ?? 72;
+      setToolsPanelPos({
+        x: Math.max(8, Math.min(window.innerWidth - dw - 8, origX + (ev.clientX - startX))),
+        y: Math.max(8, Math.min(window.innerHeight - dh - 8, origY + (ev.clientY - startY))),
+      });
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      const r = toolsPanelRef.current?.getBoundingClientRect();
+      if (r) {
+        const p = { x: r.left, y: r.top };
+        setToolsPanelPos(p);
+        try {
+          localStorage.setItem(FLOATING_TOOLS_POS_KEY, JSON.stringify(p));
+        } catch {
+          // ignore
+        }
+      }
+    };
+    document.addEventListener("pointermove", onMove, { passive: true });
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  };
 
   useEffect(() => {
     if (!networkErrorTick) {
@@ -856,9 +959,16 @@ export default function StudioConsole({
     </>
   );
 
-  /** Только группы кисти/текста/картинки (без внешней «капсулы»). */
-  const mainConsoleToolGroups = (
-    <div className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+  const mainToolsRowContent = (
+    <div
+      className={cn(
+        "inline-flex w-fit max-w-full min-w-0 flex-wrap items-center gap-1.5 px-2 py-1.5",
+        "shrink-0",
+        boardToolbarMaxClass,
+      )}
+      role="toolbar"
+      aria-label={t("header.mainToolbar")}
+    >
       <div className={innerGroupClass}>
         {pencilWidthStripeControl}
         <span
@@ -995,38 +1105,34 @@ export default function StudioConsole({
     </div>
   );
 
-  const mainConsoleToolbar = (
+  const floatingMainTools = (
     <div
-      className={cn(consoleToolsClusterClass, "shrink-0", boardToolbarMaxClass)}
-      role="toolbar"
-      aria-label={t("header.mainToolbar")}
+      ref={toolsPanelRef}
+      className="fixed z-[85] touch-manipulation will-change-transform"
+      style={{ left: toolsPanelPos.x, top: toolsPanelPos.y }}
     >
-      {mainConsoleToolGroups}
+      <div className={toolsFloatShellClass}>
+        <button
+          type="button"
+          className={toolsFloatHandleClass}
+          onPointerDown={onToolsPanelHandlePointerDown}
+          title={t("toolsPanel.dragHandle")}
+          aria-label={t("toolsPanel.dragHandle")}
+        >
+          <GripHorizontal
+            className={cn("h-3.5 w-3.5", dark ? "text-zinc-500" : ivory ? "text-stone-500" : "text-zinc-400")}
+            strokeWidth={ICON}
+            aria-hidden
+          />
+        </button>
+        {mainToolsRowContent}
+      </div>
     </div>
-  );
-
-  const desktopToolsBorder = dark
-    ? "border-zinc-500/60"
-    : ivory
-      ? "border-stone-400/60"
-      : "border-zinc-200/80";
-
-  /** Плавающая консоль: fixed, по центру сверху; ширина = boardContentWidthClass (как у холста). */
-  const floatPillClass = cn(
-    "hidden sm:flex",
-    "fixed top-[1rem] left-1/2 z-50 -translate-x-1/2",
-    "min-h-11 max-w-full items-center justify-center",
-    "rounded-full border shadow-lg shadow-black/5 backdrop-blur-md",
-    boardContentWidthClass,
-    dark
-      ? "border-zinc-600/80 bg-zinc-900/75 text-zinc-100 shadow-zinc-950/30"
-      : ivory
-        ? "border-stone-300/80 bg-[#f4efe4]/85 text-stone-900 shadow-stone-900/15"
-        : "border-zinc-200/80 bg-white/75 text-zinc-900 shadow-zinc-900/10",
   );
 
   return (
     <>
+      {floatingMainTools}
       <div className="fixed inset-x-0 top-0 z-[70] sm:hidden">
         <div
           className={cn(
@@ -1034,7 +1140,8 @@ export default function StudioConsole({
             boardContentWidthClass,
           )}
         >
-        <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-1.5">
+        <div className="grid w-full min-w-0 grid-cols-[1fr_auto] items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5">
           <Link
             href="/"
             className={cn(myBoardChipClass(), "min-h-9 shrink-0 px-2 text-xs")}
@@ -1114,16 +1221,9 @@ export default function StudioConsole({
             <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
           </button>
         </div>
-        <div className="grid w-full min-w-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-x-1.5">
-          <div className="min-w-0" aria-hidden />
-          <div className="flex min-w-0 justify-center">
-            <div className="min-w-0 max-w-full overflow-x-auto pb-0.5 [scrollbar-width:thin]">
-              {mainConsoleToolbar}
-            </div>
-          </div>
-          <div className="flex min-w-0 items-center justify-end">
-            {participantStatusPill}
-          </div>
+        <div className="flex min-w-0 justify-end self-center">
+          {participantStatusPill}
+        </div>
         </div>
         </div>
       </div>
@@ -1193,55 +1293,21 @@ export default function StudioConsole({
         </button>
       </div>
 
-      <div className={floatPillClass} role="region" aria-label={t("header.aria")}>
-        <div className="flex w-full min-w-0 max-w-full items-center justify-between gap-2 px-3 py-2 sm:px-4">
-          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1.5">
-            <LanguagePicker
-              className={cn(`${navLinkClass(false)} h-8 w-8 gap-0 p-0 sm:h-9 sm:w-9`)}
-              labelAria={t("locale.title")}
-              labelTitle={t("locale.title")}
-              dark={dark}
-              ivory={ivory}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                void onNewDocument?.();
-              }}
-              className={`${navLinkClass(false)} h-8 w-8 gap-0 p-0 sm:h-9 sm:w-9`}
-              title={t("nav.newDoc")}
-              aria-label={t("nav.newDoc")}
-            >
-              <Plus className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={ICON} aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => toggleNavMore(e.currentTarget)}
-              className={`${navLinkClass(false)} h-8 w-8 gap-0 p-0 sm:h-9 sm:w-9`}
-              title={t("nav.more")}
-              aria-label={t("nav.more")}
-              aria-expanded={navMoreOpen}
-              aria-haspopup="menu"
-            >
-              <List className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={openLibrary}
-              className={`${navLinkClass(isLibrary)} h-8 w-8 gap-0 p-0 sm:h-9 sm:w-9`}
-              title={t("nav.library")}
-              aria-label={t("nav.library")}
-              aria-pressed={isLibrary}
-            >
-              <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
-            </button>
-          </div>
-          <div className="flex min-w-0 min-h-0 flex-1 items-center justify-end pl-1 sm:pl-2">
-            {/*
-              flex-row-reverse: первый в DOM = край справа. Порядок: Счётчик → MyBoard → блок с иконками/undo.
-            */}
-            <div className="flex min-w-0 max-w-full min-h-0 flex-row-reverse flex-wrap items-center justify-end gap-1.5 sm:gap-3">
-              {participantStatusPill}
+      <header
+        className={cn(
+          "fixed inset-x-0 top-0 z-[70] hidden backdrop-blur sm:block",
+          ivory ? "border-b border-stone-200/80 bg-[#ebe6d8]/95" : dark ? "border-b border-zinc-800 bg-zinc-900/90" : "bg-zinc-100/90",
+        )}
+        aria-label={t("header.aria")}
+      >
+        <div
+          className={cn(
+            "mx-auto flex w-full min-w-0 flex-col overflow-visible px-2.5 pb-2 pt-2",
+            boardContentWidthClass,
+          )}
+        >
+          <div className="grid w-full min-w-0 grid-cols-[1fr_auto] items-center gap-2">
+            <div className="flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1.5">
               <Link
                 href="/"
                 className={cn(
@@ -1275,40 +1341,62 @@ export default function StudioConsole({
               >
                 {t("nav.myBoard")}
               </Link>
-              <div
-                className={cn(
-                  "flex min-w-0 max-w-full items-center gap-1.5 border-r",
-                  desktopToolsBorder,
-                  "pr-1.5 sm:pr-4",
-                )}
-                role="toolbar"
-                aria-label={t("header.mainToolbar")}
+              <LanguagePicker
+                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+                labelAria={t("locale.title")}
+                labelTitle={t("locale.title")}
+                dark={dark}
+                ivory={ivory}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void onNewDocument?.();
+                }}
+                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+                title={t("nav.newDoc")}
+                aria-label={t("nav.newDoc")}
               >
-                <button
-                  type="button"
-                  disabled={!canUndo}
-                  onClick={() => onUndo()}
-                  className={cn(
-                    toolButtonBase,
-                    "h-6 w-6 sm:h-7 sm:w-7",
-                    "shrink-0 disabled:cursor-not-allowed",
-                    canUndo
-                      ? toolButtonInactive
-                      : cn("opacity-40", dark ? "text-zinc-500" : ivory ? "text-stone-500" : "text-zinc-400"),
-                  )}
-                  title={t("nav.undo")}
-                  aria-label={t("nav.undo")}
-                >
-                  <Undo2 className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
-                </button>
-                <div className="min-w-0 max-w-full overflow-x-auto [scrollbar-width:thin] sm:max-w-[min(42vw,320px)]">
-                  {mainConsoleToolGroups}
-                </div>
-              </div>
+                <Plus className="h-5 w-5" strokeWidth={ICON} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => toggleNavMore(e.currentTarget)}
+                className={`${navLinkClass(false)} h-9 w-9 gap-0 p-0 shadow-md`}
+                title={t("nav.more")}
+                aria-label={t("nav.more")}
+                aria-expanded={navMoreOpen}
+                aria-haspopup="menu"
+              >
+                <List className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={openLibrary}
+                className={`${navLinkClass(isLibrary)} h-9 w-9 gap-0 p-0 shadow-md`}
+                title={t("nav.library")}
+                aria-label={t("nav.library")}
+                aria-pressed={isLibrary}
+              >
+                <FolderOpen className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
+              <button
+                type="button"
+                disabled={!canUndo}
+                onClick={() => onUndo()}
+                className={`${navLinkClass(false)} h-9 w-9 shrink-0 gap-0 p-0 shadow-md disabled:cursor-not-allowed disabled:opacity-40`}
+                title={t("nav.undo")}
+                aria-label={t("nav.undo")}
+              >
+                <Undo2 className="h-4 w-4" strokeWidth={ICON} aria-hidden />
+              </button>
+            </div>
+            <div className="flex min-w-0 items-center justify-end self-center">
+              {participantStatusPill}
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
       {navMoreOpen && navMorePos ? (
         <div
