@@ -31,6 +31,8 @@ import { ROOM_PARAM } from "../hooks/useCollaboration";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Slider } from "./ui/slider";
 import { ColorPicker } from "./ui/color-picker";
+import { BOARD_OUTER_MAX_CLASS } from "../lib/boardLayout";
+import type { BoardChrome } from "../lib/boardTheme";
 
 const ICON = 1.75 as const;
 const FLOATING_TOOLS_POS_KEY = "myboard_floating_tools_v1";
@@ -60,8 +62,7 @@ export type TextSizeOption = 10 | 14 | 18;
 
 /** @see innerGroupClass / toolBtn* в StudioConsole (dark / ivory / light) */
 
-export type BoardChrome = "light" | "dark" | "ivory";
-
+export type { BoardChrome } from "../lib/boardTheme";
 export type BoardExportFormat = "png" | "jpeg" | "pdf";
 
 type StudioConsoleProps = {
@@ -352,16 +353,16 @@ export default function StudioConsole({
         : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50",
   );
 
-  /** Участники в комнате — как кнопки-иконки в шапке, без тени. */
+  /** Участники: те же плоскости, что на неактивных пунктах навигации, без тени; как плотный chip рядом с квадратными кнопками. */
   const participantStatusPill = (
     <div
       className={cn(
-        "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium tabular-nums shadow-none transition",
+        "inline-flex h-9 min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium tabular-nums transition",
         dark
-          ? "border-zinc-600 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
+          ? "border-zinc-600 bg-zinc-900 text-zinc-100 shadow-none hover:bg-zinc-800"
           : ivory
-            ? "border-stone-300 bg-[#e8e4d4] text-stone-900 hover:bg-[#ddd8c8]"
-            : "border-zinc-200 bg-white text-zinc-900 hover:bg-gray-100",
+            ? "border-stone-300 bg-[#e8e4d4] text-stone-900 shadow-none hover:bg-[#ddd8c8]"
+            : "border-zinc-200 bg-white text-zinc-900 shadow-none hover:bg-gray-100",
       )}
       role="status"
       aria-label={t("room.participantsAria", { a: collabParticipants, b: maxRoomParticipants })}
@@ -551,8 +552,8 @@ export default function StudioConsole({
       // ignore
     }
     setToolsPanelPos({
-      x: Math.max(8, (window.innerWidth - 420) / 2),
-      y: STUDIO_CONSOLE_HEIGHT_PX + 6,
+      x: Math.max(8, window.innerWidth - 8 - 420),
+      y: STUDIO_CONSOLE_HEIGHT_PX + 8,
     });
   }, []);
 
@@ -1108,7 +1109,7 @@ export default function StudioConsole({
   const floatingMainTools = (
     <div
       ref={toolsPanelRef}
-      className="fixed z-[85] touch-manipulation will-change-transform"
+      className="fixed z-[85] hidden touch-manipulation will-change-transform sm:block"
       style={{ left: toolsPanelPos.x, top: toolsPanelPos.y }}
     >
       <div className={toolsFloatShellClass}>
@@ -1136,10 +1137,13 @@ export default function StudioConsole({
       <div className="fixed inset-x-0 top-0 z-[70] sm:hidden">
         <div
           className={cn(
-            "mx-auto flex w-full min-w-0 flex-col gap-1.5 px-2.5 pt-2",
-            boardContentWidthClass,
+            "mx-auto flex w-full min-w-0 justify-center px-2.5 pt-2",
+            BOARD_OUTER_MAX_CLASS,
           )}
         >
+          <div
+            className={cn("flex w-full min-w-0 flex-col gap-1.5", boardContentWidthClass)}
+          >
         <div className="grid w-full min-w-0 grid-cols-[1fr_auto] items-center gap-1.5">
         <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5">
           <Link
@@ -1225,6 +1229,7 @@ export default function StudioConsole({
           {participantStatusPill}
         </div>
         </div>
+          </div>
         </div>
       </div>
 
@@ -1302,10 +1307,16 @@ export default function StudioConsole({
       >
         <div
           className={cn(
-            "mx-auto flex w-full min-w-0 flex-col overflow-visible px-2.5 pb-2 pt-2",
-            boardContentWidthClass,
+            "mx-auto flex w-full min-w-0 justify-center px-2.5 sm:px-3",
+            BOARD_OUTER_MAX_CLASS,
           )}
         >
+          <div
+            className={cn(
+              "flex w-full min-w-0 flex-col overflow-visible pb-2 pt-2",
+              boardContentWidthClass,
+            )}
+          >
           <div className="grid w-full min-w-0 grid-cols-[1fr_auto] items-center gap-2">
             <div className="flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1.5">
               <Link
@@ -1394,6 +1405,7 @@ export default function StudioConsole({
             <div className="flex min-w-0 items-center justify-end self-center">
               {participantStatusPill}
             </div>
+          </div>
           </div>
         </div>
       </header>

@@ -14,71 +14,80 @@ import {
 
 const STORAGE_KEY = "myboard_appearance_v1";
 
-export type AppearanceState = {
-  inverted: boolean;
+export type Appearance = {
   comfort: boolean;
+  inverted: boolean;
 };
 
-const defaultState: AppearanceState = { inverted: false, comfort: false };
+const defaultAppearance: Appearance = { comfort: false, inverted: false };
 
-function readFromStorage(): AppearanceState {
+function readStored(): Appearance {
   if (typeof window === "undefined") {
-    return defaultState;
+    return { ...defaultAppearance };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return defaultState;
+      return { ...defaultAppearance };
     }
-    const p = JSON.parse(raw) as Partial<AppearanceState>;
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null) {
+      return { ...defaultAppearance };
+    }
+    const o = p as Record<string, unknown>;
     return {
-      inverted: Boolean(p.inverted),
-      comfort: Boolean(p.comfort),
+      comfort: Boolean(o.comfort),
+      inverted: Boolean(o.inverted),
     };
   } catch {
-    return defaultState;
+    return { ...defaultAppearance };
   }
 }
 
-type AppearanceValue = {
-  appearance: AppearanceState;
-  setAppearance: Dispatch<SetStateAction<AppearanceState>>;
+type Ctx = {
+  appearance: Appearance;
+  setAppearance: Dispatch<SetStateAction<Appearance>>;
 };
 
-const Ctx = createContext<AppearanceValue | null>(null);
+const AppearanceStateContext = createContext<Ctx | null>(null);
 
 export function AppearanceProvider({ children }: { children: ReactNode }) {
-  const [appearance, setAppearanceState] = useState<AppearanceState>(defaultState);
+  const [appearance, setAppearanceState] = useState<Appearance>(defaultAppearance);
 
   useEffect(() => {
-    setAppearanceState(readFromStorage());
+    setAppearanceState(readStored());
   }, []);
 
-  const setAppearance = useCallback(
-    (next: SetStateAction<AppearanceState>) => {
+  const setAppearance: Dispatch<SetStateAction<Appearance>> = useCallback(
+    (next) => {
       setAppearanceState((prev) => {
-        const resolved = typeof next === "function" ? (next as (a: AppearanceState) => AppearanceState)(prev) : next;
+        const n = typeof next === "function" ? next(prev) : next;
         if (typeof window !== "undefined") {
           try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(resolved));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(n));
           } catch {
             // ignore
           }
         }
-        return resolved;
+        return n;
       });
     },
     [],
   );
 
   const value = useMemo(() => ({ appearance, setAppearance }), [appearance, setAppearance]);
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+
+  return (
+    <AppearanceStateContext.Provider value={value}>
+      {children}
+    </AppearanceStateContext.Provider>
+  );
 }
 
-export function useAppearance() {
-  const c = useContext(Ctx);
-  if (!c) {
+export function useAppearance(): Ctx {
+  const ctx = useContext(AppearanceStateContext);
+  if (!ctx) {
     throw new Error("useAppearance must be used within AppearanceProvider");
   }
-  return c;
+  return ctx;
 }

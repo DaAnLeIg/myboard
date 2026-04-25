@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useLocale } from "../contexts/LocaleContext";
 import { useAppearance } from "../contexts/AppearanceContext";
+import { getBoardTheme } from "../lib/boardTheme";
 import { cn } from "../utils/cn";
 
 export function PrivacyView() {
   const { t, isUiRtl } = useLocale();
   const { appearance } = useAppearance();
-  const dark = !appearance.comfort && appearance.inverted;
-  const ivory = appearance.comfort;
+  const { dark, ivory } = getBoardTheme(appearance);
 
   return (
     <main

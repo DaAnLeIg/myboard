@@ -5,6 +5,7 @@ import { FolderOpen, Loader2, RefreshCw, Share2, Trash2, X } from "lucide-react"
 import { useRouter } from "next/navigation";
 import { useLocale } from "../contexts/LocaleContext";
 import { useAppearance } from "../contexts/AppearanceContext";
+import { getBoardTheme } from "../lib/boardTheme";
 import { type DrawingRow, listDrawings } from "../utils/drawingsApi";
 import { supabase } from "../utils/supabaseClient";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
@@ -12,8 +13,7 @@ import { useLibraryModal } from "../contexts/LibraryModalContext";
 export default function LibraryModal() {
   const { t, localeBcp47 } = useLocale();
   const { appearance } = useAppearance();
-  const dark = !appearance.comfort && appearance.inverted;
-  const ivory = appearance.comfort;
+  const { dark, ivory } = getBoardTheme(appearance);
   const { isOpen, close } = useLibraryModal();
   const router = useRouter();
   const titleId = useId();

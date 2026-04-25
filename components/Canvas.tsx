@@ -51,18 +51,18 @@ import StudioConsole, {
   type TextSizeOption,
   type Tool,
 } from "./StudioConsole";
-
-/** Внешняя оболочка доски (~2/3 от 1200px), совпадает с колонкой консоли. */
-export const BOARD_OUTER_MAX_CLASS = "max-w-[800px]";
-/** Та же ширина, что у рабочего поля — для шапки/консоли. */
-export const BOARD_CONTENT_WIDTH_CLASS = "w-[min(61.33vw,653px)]";
-/**
- * Рабочее поле: та же ширина, что у консоли, плюс обводка.
- */
-export const BOARD_WIDTH_CLASS = cn(
-  "relative overflow-hidden rounded-md border shadow-sm",
+import {
   BOARD_CONTENT_WIDTH_CLASS,
-);
+  BOARD_OUTER_MAX_CLASS,
+  BOARD_WIDTH_CLASS,
+} from "../lib/boardLayout";
+import { boardChromeFromAppearance } from "../lib/boardTheme";
+
+export {
+  BOARD_CONTENT_WIDTH_CLASS,
+  BOARD_OUTER_MAX_CLASS,
+  BOARD_WIDTH_CLASS,
+} from "../lib/boardLayout";
 
 type FabricWithEraser = typeof fabric & {
   EraserBrush?: new (canvas: fabric.Canvas) => fabric.BaseBrush;
@@ -1729,7 +1729,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     ? STUDIO_CONSOLE_MOBILE_HEADER_PX
     : STUDIO_CONSOLE_HEIGHT_PX;
 
-  const boardChrome = appearance.comfort ? "ivory" : appearance.inverted ? "dark" : "light";
+  const boardChrome = boardChromeFromAppearance(appearance);
 
   useEffect(() => {
     if (!canvasesReady) {
