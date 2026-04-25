@@ -9,11 +9,12 @@ import { getBoardTheme } from "../lib/boardTheme";
 import { type DrawingRow, listDrawings } from "../utils/drawingsApi";
 import { supabase } from "../utils/supabaseClient";
 import { useLibraryModal } from "../contexts/LibraryModalContext";
+import { cn } from "../utils/cn";
 
 export default function LibraryModal() {
   const { t, localeBcp47 } = useLocale();
   const { appearance } = useAppearance();
-  const { dark, ivory } = getBoardTheme(appearance);
+  const { dark, ivory, light } = getBoardTheme(appearance);
   const { isOpen, close } = useLibraryModal();
   const router = useRouter();
   const titleId = useId();
@@ -115,6 +116,45 @@ export default function LibraryModal() {
     return null;
   }
 
+  /** Поверхности в духе `innerGroup` / share-диалога `StudioConsole`. */
+  const modalShellClass = cn(
+    "relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border shadow-2xl",
+    dark && "border-zinc-600/80 bg-zinc-900 shadow-black/40",
+    ivory && "border-stone-400/80 bg-[#f4efe4] shadow-stone-900/20",
+    light && "border-zinc-200/90 bg-white/98 shadow-zinc-900/10",
+  );
+
+  const cardClass = cn(
+    "group flex min-h-[7.5rem] flex-col rounded-xl border p-3 shadow-sm transition-shadow hover:shadow-md",
+    dark && "border-zinc-600/80 bg-zinc-800/90 ring-1 ring-white/5",
+    ivory && "border-stone-400/70 bg-[#ebe6d8] ring-1 ring-stone-500/20 shadow-stone-900/5",
+    light && "border-zinc-200/80 bg-zinc-50/95 ring-1 ring-zinc-200/50",
+  );
+
+  const previewHolderClass = cn(
+    "mb-2 h-28 w-full overflow-hidden rounded-lg",
+    dark && "bg-zinc-900",
+    ivory && "bg-[#d5cebc]/80 ring-1 ring-inset ring-stone-400/30",
+    light && "bg-zinc-100 ring-1 ring-inset ring-zinc-200/50",
+  );
+
+  const iconBtnClass =
+    "inline-flex h-8 w-8 items-center justify-center rounded-md border-0 p-0 transition outline-none";
+  const rowActionBtn = cn(
+    iconBtnClass,
+    dark && "text-zinc-200 hover:bg-zinc-700/90",
+    ivory && "text-stone-800 hover:bg-[#cec6b0]/90",
+    light && "text-zinc-800 hover:bg-zinc-200/80",
+  );
+
+  const deleteBtnClass = cn(
+    iconBtnClass,
+    "text-red-500 disabled:cursor-not-allowed disabled:opacity-50",
+    dark && "hover:bg-red-950/50 hover:text-red-400",
+    ivory && "hover:bg-red-100/90 hover:text-red-800",
+    light && "hover:bg-red-50 hover:text-red-600",
+  );
+
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center p-4"
@@ -130,59 +170,49 @@ export default function LibraryModal() {
         aria-label={t("library.closeBg")}
       />
       <div
-        className={
-          dark
-            ? "relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-zinc-600/80 bg-zinc-900 shadow-2xl shadow-black/40"
-            : ivory
-              ? "relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-300/80 bg-[#f4efe4] shadow-2xl shadow-stone-900/15"
-              : "relative z-[1] flex max-h-[min(90vh,760px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-2xl shadow-gray-200/50"
-        }
+        className={modalShellClass}
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={close}
-          className={
-            dark
-              ? "absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100"
-              : ivory
-                ? "absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-stone-500 transition hover:bg-[#e8e4d4] hover:text-stone-900"
-                : "absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
-          }
+          className={cn(
+            "absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full transition",
+            dark && "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+            ivory && "text-stone-500 hover:bg-[#ddd8c8] hover:text-stone-900",
+            light && "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900",
+          )}
           title={t("dialog.close")}
           aria-label={t("dialog.close")}
         >
           <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
         </button>
         <div
-          className={
-            dark
-              ? "shrink-0 border-b border-zinc-700 px-5 pb-5 pr-32 pt-6 sm:pr-40"
-              : ivory
-                ? "shrink-0 border-b border-stone-300/80 px-5 pb-5 pr-32 pt-6 sm:pr-40"
-                : "shrink-0 border-b border-gray-100 px-5 pb-5 pr-32 pt-6 sm:pr-40"
-          }
+          className={cn(
+            "shrink-0 border-b px-5 pb-5 pr-32 pt-6 sm:pr-40",
+            dark && "border-zinc-700",
+            ivory && "border-stone-300/80",
+            light && "border-zinc-200/90",
+          )}
         >
           <h2
             id={titleId}
-            className={
-              dark
-                ? "text-2xl font-bold tracking-tight text-zinc-100 sm:text-3xl"
-                : ivory
-                  ? "text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl"
-                  : "text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl"
-            }
+            className={cn(
+              "text-2xl font-bold tracking-tight sm:text-3xl",
+              dark && "text-zinc-100",
+              ivory && "text-stone-900",
+              light && "text-zinc-900",
+            )}
           >
             {t("library.title")}
           </h2>
           <p
-            className={
-              dark
-                ? "mt-1 text-sm text-zinc-400"
-                : ivory
-                  ? "mt-1 text-sm text-stone-600"
-                  : "mt-1 text-sm text-gray-500"
-            }
+            className={cn(
+              "mt-1 text-sm",
+              dark && "text-zinc-400",
+              ivory && "text-stone-600",
+              light && "text-zinc-500",
+            )}
           >
             {t("library.sub")}
           </p>
@@ -191,13 +221,12 @@ export default function LibraryModal() {
           <button
             type="button"
             onClick={() => void loadDrawings()}
-            className={
-              dark
-                ? "inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-200"
-                : ivory
-                  ? "inline-flex h-9 w-9 items-center justify-center rounded-full text-stone-500 transition hover:bg-[#e8e4d4] hover:text-stone-900"
-                  : "inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
-            }
+            className={cn(
+              "inline-flex h-9 w-9 items-center justify-center rounded-full transition",
+              dark && "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200",
+              ivory && "text-stone-600 hover:bg-[#ddd8c8] hover:text-stone-900",
+              light && "text-zinc-500 hover:bg-zinc-200/80 hover:text-zinc-900",
+            )}
             title={t("library.refresh")}
             aria-label={t("library.refreshAria")}
           >
@@ -207,13 +236,12 @@ export default function LibraryModal() {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
             <div
-              className={
-                dark
-                  ? "flex items-center gap-2 py-2 text-zinc-500"
-                  : ivory
-                    ? "flex items-center gap-2 py-2 text-stone-500"
-                    : "flex items-center gap-2 py-2 text-gray-400"
-              }
+              className={cn(
+                "flex items-center gap-2 py-2",
+                dark && "text-zinc-500",
+                ivory && "text-stone-600",
+                light && "text-zinc-400",
+              )}
               aria-busy="true"
               aria-live="polite"
             >
@@ -221,18 +249,24 @@ export default function LibraryModal() {
               <span className="sr-only">{t("library.loadList")}</span>
             </div>
           ) : error ? (
-            <p className="text-sm text-red-600/90">
+            <p
+              className={cn(
+                "text-sm",
+                dark && "text-red-400",
+                ivory && "text-red-800",
+                light && "text-red-600/90",
+              )}
+            >
               {t("library.loadErr")}: {error}
             </p>
           ) : rows.length === 0 ? (
             <p
-              className={
-                dark
-                  ? "text-sm text-zinc-500"
-                  : ivory
-                    ? "text-sm text-stone-600"
-                    : "text-sm text-gray-500"
-              }
+              className={cn(
+                "text-sm",
+                dark && "text-zinc-500",
+                ivory && "text-stone-600",
+                light && "text-zinc-500",
+              )}
             >
               {t("library.empty")}
             </p>
@@ -243,24 +277,10 @@ export default function LibraryModal() {
                 return (
                   <li
                     key={row.id}
-                    className={
-                      dark
-                        ? "group flex min-h-[7.5rem] flex-col rounded-xl border border-zinc-700/90 bg-zinc-800/80 p-3 shadow-sm transition-shadow hover:shadow-md"
-                        : ivory
-                          ? "group flex min-h-[7.5rem] flex-col rounded-xl border border-stone-300/80 bg-[#faf8f3] p-3 shadow-sm transition-shadow hover:shadow-md"
-                          : "group flex min-h-[7.5rem] flex-col rounded-xl border border-gray-100 bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
-                    }
+                    className={cardClass}
                     title={row.id}
                   >
-                    <div
-                      className={
-                        dark
-                          ? "mb-2 h-28 w-full overflow-hidden rounded-lg bg-zinc-900"
-                          : ivory
-                            ? "mb-2 h-28 w-full overflow-hidden rounded-lg bg-stone-200/80"
-                            : "mb-2 h-28 w-full overflow-hidden rounded-lg bg-gray-100"
-                      }
-                    >
+                    <div className={previewHolderClass}>
                       {row.preview_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -271,38 +291,35 @@ export default function LibraryModal() {
                         />
                       ) : (
                         <div
-                          className={
-                            dark
-                              ? "flex h-full w-full items-center justify-center text-xs text-zinc-500"
-                              : ivory
-                                ? "flex h-full w-full items-center justify-center text-xs text-stone-500"
-                                : "flex h-full w-full items-center justify-center text-xs text-gray-400"
-                          }
+                          className={cn(
+                            "flex h-full w-full items-center justify-center text-xs",
+                            dark && "text-zinc-500",
+                            ivory && "text-stone-500",
+                            light && "text-zinc-500",
+                          )}
                         >
                           {t("library.noPreview")}
                         </div>
                       )}
                     </div>
                     <h3
-                      className={
-                        dark
-                          ? "line-clamp-2 min-h-0 text-sm font-bold leading-snug text-zinc-100"
-                          : ivory
-                            ? "line-clamp-2 min-h-0 text-sm font-bold leading-snug text-stone-900"
-                            : "line-clamp-2 min-h-0 text-sm font-bold leading-snug text-gray-900"
-                      }
+                      className={cn(
+                        "line-clamp-2 min-h-0 text-sm font-bold leading-snug",
+                        dark && "text-zinc-100",
+                        ivory && "text-stone-900",
+                        light && "text-zinc-900",
+                      )}
                     >
                       {row.name || t("library.unnamed")}
                     </h3>
                     <div className="mt-auto w-full pt-4">
                       <p
-                        className={
-                          dark
-                            ? "text-xs leading-relaxed text-zinc-500"
-                            : ivory
-                              ? "text-xs leading-relaxed text-stone-600"
-                              : "text-xs leading-relaxed text-gray-500"
-                        }
+                        className={cn(
+                          "text-xs leading-relaxed",
+                          dark && "text-zinc-500",
+                          ivory && "text-stone-600",
+                          light && "text-zinc-500",
+                        )}
                       >
                         {row.created_at
                           ? new Date(row.created_at).toLocaleString(localeBcp47, {
@@ -315,13 +332,7 @@ export default function LibraryModal() {
                         <button
                           type="button"
                           onClick={() => openOnBoard(row.id)}
-                          className={
-                            dark
-                              ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100"
-                              : ivory
-                                ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-[#e8e4d4] hover:text-stone-900"
-                                : "inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
-                          }
+                          className={rowActionBtn}
                           title={t("library.open")}
                           aria-label={t("library.openAria", {
                             name: row.name || t("library.unnamed"),
@@ -333,13 +344,7 @@ export default function LibraryModal() {
                         <button
                           type="button"
                           onClick={() => void shareDrawingLink(row.id)}
-                          className={
-                            dark
-                              ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100"
-                              : ivory
-                                ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-stone-600 transition hover:bg-[#e8e4d4] hover:text-stone-900"
-                                : "inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
-                          }
+                          className={rowActionBtn}
                           title={t("library.share")}
                           aria-label={t("library.shareAria", { name: row.name || t("library.unnamed") })}
                           disabled={busy}
@@ -350,19 +355,18 @@ export default function LibraryModal() {
                           type="button"
                           onClick={() => void onDelete(row)}
                           disabled={busy}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+                          className={deleteBtnClass}
                           title={t("library.delete")}
                           aria-label={t("library.deleteAria", { name: row.name || t("library.unnamed") })}
                         >
                           {busy ? (
                             <Loader2
-                              className={
-                                dark
-                                  ? "h-4 w-4 shrink-0 animate-spin text-zinc-500"
-                                  : ivory
-                                    ? "h-4 w-4 shrink-0 animate-spin text-stone-500"
-                                    : "h-4 w-4 shrink-0 animate-spin text-gray-500"
-                              }
+                              className={cn(
+                                "h-4 w-4 shrink-0 animate-spin",
+                                dark && "text-zinc-500",
+                                ivory && "text-stone-500",
+                                light && "text-zinc-500",
+                              )}
                               strokeWidth={1.75}
                               aria-hidden
                             />

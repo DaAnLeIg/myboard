@@ -545,27 +545,22 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     });
   };
 
-  const applyTextFontSizeToAll = (px: TextSizeOption) => {
+  /** Размер в панели — для новых блоков и дальнейшего набора; уже введённые блоки не масштабируем. */
+  const applyTextFontSizeForSubsequentTyping = (px: TextSizeOption) => {
     const textCanvas = textCanvasRef.current;
     if (!textCanvas) {
       return;
     }
     setTextFontSize(px);
     textFontSizeRef.current = px;
-    for (const obj of textCanvas.getObjects()) {
-      if (!(obj instanceof fabric.IText)) {
-        continue;
-      }
-      obj.set("fontSize", px);
-      if (obj.isEditing) {
-        setTextEditingVisuals(obj);
-      } else {
-        setTextIdleVisuals(obj);
-      }
+    const active = textCanvas.getActiveObject();
+    if (active instanceof fabric.IText && active.isEditing) {
+      active.set("fontSize", px);
+      setTextEditingVisuals(active);
+      textCanvas.requestRenderAll();
+      recalcDocumentHeightRef.current?.();
+      requestSaveRef.current?.();
     }
-    textCanvas.requestRenderAll();
-    recalcDocumentHeightRef.current?.();
-    requestSaveRef.current?.();
   };
 
   const clearTextEditingVisuals = () => {
@@ -1802,8 +1797,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           setActiveTool("eraser");
         }}
         onTextSize={(px) => {
-          clearTextEditingVisuals();
-          applyTextFontSizeToAll(px);
+          applyTextFontSizeForSubsequentTyping(px);
         }}
         onAddText={addText}
         onAddImage={() => {
