@@ -50,6 +50,7 @@ import {
 import { MAX_ROOM_PARTICIPANTS, useRoomCollaboration } from "../hooks/useCollaboration";
 import { useOfflineSync } from "../hooks/useOfflineSync";
 import { cn } from "../utils/cn";
+import { getSmartPosition } from "../utils/textSmartPosition";
 import { useLocale } from "../contexts/LocaleContext";
 import { useAppearance } from "../contexts/AppearanceContext";
 import { useSavedWorksRefresh } from "../contexts/SavedWorksRefreshContext";
@@ -81,6 +82,7 @@ const TEXT_HORIZONTAL_PADDING = 14;
 const DEFAULT_PENCIL_COLOR = "#000000";
 const DEFAULT_PENCIL_WIDTH = 3 as const;
 const DEFAULT_TEXT_SIZE: TextSizeOption = 14;
+const FORCE_EDIT_KEY = "mbForceEdit";
 const DOCUMENT_BOTTOM_PADDING = 24;
 const SUPABASE_CANVAS_TABLE = "canvas_documents";
 const SUPABASE_DOCUMENT_ID = "default";
@@ -97,6 +99,7 @@ const TEXT_KEYBOARD_BOUND_ATTR = "data-myboard-text-keys";
 
 /** Ключ, чтобы не вешать на один IText два `changed` с размером. */
 const ITEXT_SIZE_LISTENER = "__myboardITextSizeRange";
+const TEXT_UI_BOUND_KEY = "__myboardTextUiBound";
 
 /**
  * В `now` — диапазон [start, end) вставки или заменённого куска относительно `lastText`
@@ -444,7 +447,11 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
               OBJECT_UPDATED_AT_KEY,
               "mbCollabId",
             ]) as Record<string, unknown>)
-          : (obj.toObject([OBJECT_UPDATED_AT_KEY, "mbCollabId"]) as Record<string, unknown>);
+          : (obj.toObject([
+              OBJECT_UPDATED_AT_KEY,
+              "mbCollabId",
+              ...(layer === "text" ? [FORCE_EDIT_KEY] : []),
+            ]) as Record<string, unknown>);
 
       const drawingId = canvasObjectsDrawingId;
       const rowId = `${drawingId}:${objectId}`;
@@ -694,12 +701,42 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   };
   bindITextSizeOnTextChangeRef.current = bindITextSizeOnTextChange;
 
+  const ensureTextUiBound = (t: EditableTextObject) => {
+    const rec = t as unknown as Record<string, unknown>;
+    if (rec[TEXT_UI_BOUND_KEY]) {
+      return;
+    }
+    rec[TEXT_UI_BOUND_KEY] = true;
+
+    bindITextSizeOnTextChange(t);
+    setTextIdleVisuals(t);
+
+    t.on("editing:entered", () => {
+      setTextEditingVisuals(t);
+      applyTextLocaleToObject(t);
+      bindTextKeyboardShortcuts(t);
+      const textCanvas = textCanvasRef.current;
+      textCanvas?.requestRenderAll();
+      recalcDocumentHeightRef.current?.();
+      requestSaveRef.current?.();
+      t.hiddenTextarea?.focus();
+    });
+
+    t.on("editing:exited", () => {
+      setTextIdleVisuals(t);
+      const textCanvas = textCanvasRef.current;
+      textCanvas?.requestRenderAll();
+      recalcDocumentHeightRef.current?.();
+      requestSaveRef.current?.();
+    });
+  };
+
   /**
    * Смена кегля через `setSelectionStyles` (Fabric): выделение — на весь range;
    * свернутый курсор — стиль в точке [s, s+1) для след. ввода. Затем `initDimensions` и сохранение
    * полного JSON объекта (persist + `changed` для согласованности с Realtime/Supabase).
    */
-  const updateFontSize = (size: number) => {
+  const handleFontSizeChange = (size: number) => {
     const next: TextSizeOption =
       size === 10 || size === 14 || size === 18
         ? size
@@ -719,14 +756,18 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return;
     }
     const t = active as EditableTextObject;
-    const s = t.selectionStart ?? 0;
-    const e = t.selectionEnd ?? s;
-    if (e > s) {
-      t.setSelectionStyles({ fontSize: size }, s, e);
+
+    if (t.isEditing) {
+      t.setSelectionStyles({ fontSize: next });
     } else {
-      t.setSelectionStyles({ fontSize: size }, s, s + 1);
+      const s = t.selectionStart ?? 0;
+      const e = t.selectionEnd ?? s;
+      if (e > s) {
+        t.setSelectionStyles({ fontSize: next }, s, e);
+      } else {
+        t.setSelectionStyles({ fontSize: next }, s, s + 1);
+      }
     }
-    t.set("fontSize", next);
     t.initDimensions();
     if (t.isEditing) {
       setTextEditingVisuals(t);
@@ -735,7 +776,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     textCanvas.requestRenderAll();
     recalcDocumentHeightRef.current?.();
     requestSaveRef.current?.();
-    t.fire("changed" as "changed" & string);
   };
 
   const clearTextEditingVisuals = () => {
@@ -1238,7 +1278,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       const p = textCanvas.getScenePoint(event.e);
       const maxWidth = Math.max(180, Math.floor(textCanvas.getWidth() * 0.8));
       const size = textFontSizeRef.current;
-      const newText = new fabric.Textbox("", {
+      const newText = new fabric.IText("", {
         left: Math.max(16, p.x),
         top: Math.max(16, p.y),
         width: maxWidth,
@@ -1246,6 +1286,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         fontSize: size,
         fill: "#000000",
         editable: true,
+        objectCaching: false,
         backgroundColor: "rgba(255,255,255,0.25)",
         padding: TEXT_HORIZONTAL_PADDING,
         borderColor: "rgba(255, 80, 80, 0.35)",
@@ -1253,6 +1294,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         cursorColor: "#000000",
         selectionColor: "rgba(255, 80, 80, 0.15)",
       });
+      const smartPos = getSmartPosition(textCanvas, newText);
+      newText.set({ left: smartPos.left, top: smartPos.top });
       setTextIdleVisuals(newText);
       bindITextSizeOnTextChange(newText);
       newText.on("editing:entered", () => {
@@ -1335,6 +1378,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         const target = evt.target as fabric.Object | null;
         ensureObjectUuid(target);
         markObjectUpdatedAt(target);
+        if (
+          canvas === textCanvas &&
+          (target instanceof fabric.IText || target instanceof fabric.Textbox)
+        ) {
+          ensureTextUiBound(target);
+        }
       });
       canvas.on("object:modified", (evt) => markObjectUpdatedAt(evt.target as fabric.Object | null));
       canvas.on("object:added", (evt) => {
@@ -1700,69 +1749,106 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     setActiveTool("text");
     const textCanvas = textCanvasRef.current;
     const drawCanvas = drawCanvasRef.current;
-    if (textCanvas && drawCanvas) {
-      textCanvas.wrapperEl.style.pointerEvents = "auto";
-      textCanvas.upperCanvasEl.style.pointerEvents = "auto";
-      drawCanvas.wrapperEl.style.pointerEvents = "none";
-      drawCanvas.upperCanvasEl.style.pointerEvents = "none";
-      drawCanvas.isDrawingMode = false;
-      textCanvas.defaultCursor = "text";
-
-      const size = textFontSizeRef.current;
-      const existingText = lastTextObjectRef.current;
-      const hasExistingText =
-        existingText && textCanvas.getObjects().includes(existingText);
-      const canvasWidth = textCanvas.getWidth();
-      const baseLeft = Math.max(20, canvasWidth * 0.1);
-      const baseTop = 48;
-      const nextTop =
-        hasExistingText && existingText
-          ? (existingText.top ?? baseTop) + existingText.getScaledHeight() + 20
-          : baseTop;
-
-      const newText = new fabric.Textbox("", {
-        left: baseLeft,
-        top: nextTop,
-        width: Math.max(180, Math.floor(canvasWidth * 0.8)),
-        fontFamily: "Arial",
-        fontSize: size,
-        fill: "#000000",
-        editable: true,
-        backgroundColor: "rgba(255,255,255,0.25)",
-        padding: TEXT_HORIZONTAL_PADDING,
-        borderColor: "rgba(255, 80, 80, 0.35)",
-        editingBorderColor: "rgba(255, 80, 80, 0.55)",
-        cursorColor: "#000000",
-        selectionColor: "rgba(255, 80, 80, 0.15)",
-      });
-      setTextIdleVisuals(newText);
-      newText.on("editing:entered", () => {
-        setTextEditingVisuals(newText);
-        applyTextLocaleToObject(newText);
-        bindTextKeyboardShortcuts(newText);
-        textCanvas.requestRenderAll();
-        recalcDocumentHeightRef.current?.();
-        requestSaveRef.current?.();
-      });
-      newText.on("editing:exited", () => {
-        setTextIdleVisuals(newText);
-        textCanvas.requestRenderAll();
-        recalcDocumentHeightRef.current?.();
-        requestSaveRef.current?.();
-      });
-      bindITextSizeOnTextChange(newText);
-
-      lastTextObjectRef.current = newText;
-      textCanvas.add(newText);
-      textCanvas.setActiveObject(newText);
-      newText.enterEditing();
-      newText.hiddenTextarea?.focus();
-      applyTextLocaleToObject(newText);
-      bindTextKeyboardShortcuts(newText);
-      textCanvas.requestRenderAll();
-      recalcDocumentHeightRef.current?.();
-      requestSaveRef.current?.();
+    if (!textCanvas || !drawCanvas) {
+      return;
     }
+
+    // '+' (новый текстовый блок): сбрасываем "текущий размер" к дефолту 14.
+    setTextFontSize(DEFAULT_TEXT_SIZE);
+    textFontSizeRef.current = DEFAULT_TEXT_SIZE;
+
+    textCanvas.wrapperEl.style.pointerEvents = "auto";
+    textCanvas.upperCanvasEl.style.pointerEvents = "auto";
+    drawCanvas.wrapperEl.style.pointerEvents = "none";
+    drawCanvas.upperCanvasEl.style.pointerEvents = "none";
+    drawCanvas.isDrawingMode = false;
+    textCanvas.defaultCursor = "text";
+
+    const canvasWidth = textCanvas.getWidth();
+    const baseLeft = Math.max(20, canvasWidth * 0.1);
+    const baseTop = 48;
+    const width = Math.max(180, Math.floor(canvasWidth * 0.8));
+
+    const newText = new fabric.IText("Начните печатать...", {
+      left: baseLeft,
+      top: baseTop,
+      width,
+      fontFamily: "Arial",
+      fontSize: DEFAULT_TEXT_SIZE,
+      fill: "#000000",
+      editable: true,
+      objectCaching: false,
+    });
+
+    // Чтобы остальные участники могли открыть редактирование сразу после INSERT.
+    (newText as fabric.Object & { set: (k: string, v: boolean) => void }).set(FORCE_EDIT_KEY, true);
+
+    const smartPos = getSmartPosition(textCanvas, newText);
+    newText.set({ left: smartPos.left, top: smartPos.top });
+
+    ensureTextUiBound(newText);
+    lastTextObjectRef.current = newText;
+    textCanvas.add(newText);
+    // Сразу после add — чтобы гарантированно появился курсор/обновление.
+    textCanvas.requestRenderAll();
+    textCanvas.setActiveObject(newText);
+    newText.enterEditing();
+    try {
+      const len = typeof newText.text === "string" ? newText.text.length : 0;
+      newText.hiddenTextarea?.setSelectionRange(len, len);
+    } catch {
+      // ignore
+    }
+  };
+
+  const editExistingText = () => {
+    setIsImageDeleteMode(false);
+    isImageDeleteModeRef.current = false;
+    activeToolRef.current = "text";
+    setActiveTool("text");
+
+    const textCanvas = textCanvasRef.current;
+    if (!textCanvas) {
+      return;
+    }
+
+    const candidate =
+      (lastTextObjectRef.current && textCanvas.getObjects().includes(lastTextObjectRef.current)
+        ? lastTextObjectRef.current
+        : null) ??
+      (textCanvas
+        .getObjects()
+        .filter(
+          (o): o is EditableTextObject => o instanceof fabric.IText || o instanceof fabric.Textbox,
+        )
+        .at(-1) ?? null);
+
+    if (!candidate) {
+      return;
+    }
+
+    ensureTextUiBound(candidate);
+    const t = candidate;
+
+    textCanvas.setActiveObject(t);
+    const len = typeof t.text === "string" ? t.text.length : 0;
+    t.enterEditing();
+    try {
+      t.hiddenTextarea?.setSelectionRange(len, len);
+    } catch {
+      // ignore
+    }
+    t.setSelectionStyles({ fontSize: textFontSizeRef.current });
+    t.hiddenTextarea?.focus();
+
+    if (t.isEditing) {
+      setTextEditingVisuals(t);
+    }
+    t.initDimensions();
+    textCanvas.requestRenderAll();
+    recalcDocumentHeightRef.current?.();
+    void persistFabricObject("text", t);
+    requestSaveRef.current?.();
   };
 
   const openFileDialog = () => {
@@ -2062,9 +2148,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           setActiveTool("eraser");
         }}
         onTextSize={(px) => {
-          updateFontSize(px);
+          handleFontSizeChange(px);
         }}
         onAddText={addText}
+        onEditText={editExistingText}
         onAddImage={() => {
           clearTextEditingVisuals();
           openFileDialog();

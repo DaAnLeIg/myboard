@@ -12,6 +12,7 @@ import { decode as decodeMsgPack, encode as encodeMsgPack } from "@msgpack/msgpa
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "../utils/supabaseClient";
 import { STORAGE_PATH_KEY } from "../utils/imageStorage";
+import { getSmartPosition } from "../utils/textSmartPosition";
 
 const BROADCAST_ADD_OBJECT = "collab-object-add";
 const BROADCAST_REMOVE_OBJECT = "collab-object-remove";
@@ -20,6 +21,7 @@ const BROADCAST_CURSOR = "collab-cursor";
 export const ROOM_PARAM = "room";
 export const MAX_ROOM_PARTICIPANTS = 10;
 const COLLAB_ID_KEY = "mbCollabId";
+const FORCE_EDIT_KEY = "mbForceEdit";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function addCustomProp(C: any, name: string) {
@@ -35,6 +37,8 @@ void (function registerCollabId() {
   addCustomProp(FabricImage, COLLAB_ID_KEY);
   addCustomProp(IText, COLLAB_ID_KEY);
   addCustomProp(Textbox, COLLAB_ID_KEY);
+  addCustomProp(IText, FORCE_EDIT_KEY);
+  addCustomProp(Textbox, FORCE_EDIT_KEY);
   addCustomProp(Path, COLLAB_ID_KEY);
 })();
 
@@ -307,6 +311,7 @@ function unwrapDrawEvent(payload: Record<string, unknown>): Record<string, unkno
     typeof data === "object"
   ) {
     return {
+      action,
       ...(data as Record<string, unknown>),
       type: t,
     };
@@ -330,6 +335,7 @@ export async function upsertObjectOnCanvas(
   const collabId = data[COLLAB_ID_KEY] as string | undefined;
   const existing =
     collabId && collabId.length > 0 ? findObjectByCollabId(canvas, collabId) : undefined;
+  const incomingForceEdit = data[FORCE_EDIT_KEY] === true;
 
   isApplyingRemoteRef.current = true;
   try {
@@ -433,18 +439,52 @@ export async function upsertObjectOnCanvas(
 
     if (isFabricTextType(data.type as string | undefined)) {
       const text = typeof (data as { text?: unknown }).text === "string" ? (data as { text: string }).text : "";
-      const box = new Textbox(text, {
+      const shouldForceEdit = incomingForceEdit && !existing;
+      const isIText = data.type === "IText" || data.type === "i-text";
+      const box = isIText
+        ? new IText(text, {
+            ...pickTransform(data),
+            width: (data as { width?: number }).width ?? 320,
+            fontSize: (data as { fontSize?: number }).fontSize,
+            fontFamily: (data as { fontFamily?: string }).fontFamily,
+            fill: (data as { fill?: unknown }).fill as string | undefined,
+            editable: true,
+            objectCaching: false,
+          })
+        : new Textbox(text, {
         ...pickTransform(data),
         width: (data as { width?: number }).width ?? 320,
         fontSize: (data as { fontSize?: number }).fontSize,
         fontFamily: (data as { fontFamily?: string }).fontFamily,
         fill: (data as { fill?: unknown }).fill as string | undefined,
+        editable: true,
+        objectCaching: false,
       });
       if (collabId) {
         (box as FabricObject & { set: (k: string, v: string) => void }).set(COLLAB_ID_KEY, collabId);
       }
+
+      const smartPos = getSmartPosition(canvas, box);
+      box.set({ left: smartPos.left, top: smartPos.top });
+
       canvas.add(box);
-      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+
+      if (shouldForceEdit) {
+        canvas.setActiveObject(box);
+        box.enterEditing();
+        const len = typeof box.text === "string" ? box.text.length : 0;
+        try {
+          box.selectionStart = len;
+          box.selectionEnd = len;
+          box.hiddenTextarea?.setSelectionRange(len, len);
+        } catch {
+          // ignore
+        }
+        box.hiddenTextarea?.focus();
+      } else {
+        canvas.discardActiveObject();
+      }
       canvas.requestRenderAll();
       return;
     }
@@ -720,8 +760,9 @@ export function useRoomCollaboration({
       }
       ensureCollabId(o);
       const textObj = o as IText | Textbox;
+      const forceEdit = (textObj as FabricObject & { get: (k: string) => unknown }).get(FORCE_EDIT_KEY);
+      const fabricType = textObj.type as string;
       const d: Record<string, unknown> = {
-        type: "textbox",
         left: textObj.left,
         top: textObj.top,
         scaleX: textObj.scaleX,
@@ -735,6 +776,7 @@ export function useRoomCollaboration({
         fontSize: textObj.fontSize,
         fontFamily: textObj.fontFamily,
         fill: textObj.fill,
+        [FORCE_EDIT_KEY]: forceEdit === true,
       };
       d[COLLAB_ID_KEY] = (textObj as FabricObject & { get: (k: string) => unknown }).get(COLLAB_ID_KEY);
       sendAdd({
@@ -742,7 +784,7 @@ export function useRoomCollaboration({
         roomId,
         senderId: clientIdRef.current,
         layer: "text",
-        object: wrapDrawEvent("add", "textbox", d),
+        object: wrapDrawEvent("add", fabricType, d),
       });
     };
 

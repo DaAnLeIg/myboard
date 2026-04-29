@@ -153,6 +153,19 @@ const ENTRIES: Entry[] = [
     L("Вставить новый текст", "Insert new text", "Vložit text", "Insertar texto", "Szöveg beszúrása", "Text einfügen", "नया टेक्स्ट", "إدراج نص جديد"),
   ],
   [
+    "text.editExisting",
+    L(
+      "Редактировать существующее",
+      "Edit existing",
+      "Upravit existující",
+      "Editar existente",
+      "Meglévő szerkesztése",
+      "Vorhandenen Text bearbeiten",
+      "मौजूदा संपादित करें",
+      "تعديل النص الموجود",
+    ),
+  ],
+  [
     "image.add",
     L("Вставить изображение", "Insert image", "Vložit obrázek", "Insertar imagen", "Kép beillesztése", "Bild einfügen", "छवि जोड़ें", "إدراج صورة"),
   ],

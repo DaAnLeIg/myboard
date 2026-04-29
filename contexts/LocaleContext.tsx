@@ -33,14 +33,14 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 function readInitialLocale(): AppLocale {
   if (typeof window === "undefined") {
-    return "ru";
+    return "en";
   }
   const raw = localStorage.getItem(LOCALE_STORAGE_KEY);
-  return isAppLocale(raw) ? raw : "ru";
+  return isAppLocale(raw) ? raw : "en";
 }
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<AppLocale>("ru");
+  const [locale, setLocaleState] = useState<AppLocale>("en");
 
   const setLocale = useCallback((next: AppLocale) => {
     setLocaleState(next);
