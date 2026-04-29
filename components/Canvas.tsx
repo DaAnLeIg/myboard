@@ -1769,7 +1769,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     const baseTop = 48;
     const width = Math.max(180, Math.floor(canvasWidth * 0.8));
 
-    const newText = new fabric.IText("Начните печатать...", {
+    const newText = new fabric.IText("ТЕКСТ", {
       left: baseLeft,
       top: baseTop,
       width,
