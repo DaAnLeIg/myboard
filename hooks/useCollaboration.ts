@@ -926,6 +926,18 @@ export function useRoomCollaboration({
       }, MODIFY_DEBOUNCE_MS);
     };
 
+    // В отличие от object:added, это событие приходит во время печати по символам.
+    const onTextChanged = (e: { target?: FabricObject | null }) => {
+      const t = e.target ?? null;
+      if (!t || isRestoringRef.current || isApplyingRemoteRef.current) {
+        return;
+      }
+      if (!isFabricTextType(t.type as string | undefined)) {
+        return;
+      }
+      sendTextUpsert(t);
+    };
+
     const onImg = (e: { target: FabricObject | null }) => {
       const t = e.target;
       if (!t || isRestoringRef.current || isApplyingRemoteRef.current) {
@@ -1008,6 +1020,7 @@ export function useRoomCollaboration({
     drawC.on("path:created", onPathCreatedCollab);
     textC.on("object:added", onText);
     textC.on("object:modified", onTextModified);
+    textC.on("text:changed", onTextChanged);
     imgC.on("object:added", onImg);
     imgC.on("object:modified", onImgModified);
     drawC.on("object:modified", onDrawModified);
@@ -1068,6 +1081,7 @@ export function useRoomCollaboration({
       drawC.off("path:created", onPathCreatedCollab);
       textC.off("object:added", onText);
       textC.off("object:modified", onTextModified);
+      textC.off("text:changed", onTextChanged);
       imgC.off("object:added", onImg);
       imgC.off("object:modified", onImgModified);
       drawC.off("object:modified", onDrawModified);

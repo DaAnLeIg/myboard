@@ -1818,7 +1818,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     const baseTop = 48;
     const width = Math.max(180, Math.floor(canvasWidth * 0.8));
 
-    const newText = new fabric.IText("ТЕКСТ", {
+    const newText = new fabric.IText("Начните печатать...", {
       left: baseLeft,
       top: baseTop,
       width,
@@ -1848,6 +1848,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     } catch {
       // ignore
     }
+    newText.hiddenTextarea?.focus();
   };
 
   const openFileDialog = () => {
