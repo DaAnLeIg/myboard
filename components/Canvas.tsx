@@ -731,6 +731,53 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     });
   };
 
+  const getEditableTextTarget = (): EditableTextObject | null => {
+    const textCanvas = textCanvasRef.current;
+    if (!textCanvas) {
+      return null;
+    }
+
+    const active = textCanvas.getActiveObject();
+    if (active instanceof fabric.IText || active instanceof fabric.Textbox) {
+      return active;
+    }
+
+    if (lastTextObjectRef.current && textCanvas.getObjects().includes(lastTextObjectRef.current)) {
+      return lastTextObjectRef.current;
+    }
+
+    return (
+      textCanvas
+        .getObjects()
+        .filter((o): o is EditableTextObject => o instanceof fabric.IText || o instanceof fabric.Textbox)
+        .at(-1) ?? null
+    );
+  };
+
+  const autoEnterTextEditing = (): EditableTextObject | null => {
+    const textCanvas = textCanvasRef.current;
+    if (!textCanvas) {
+      return null;
+    }
+    const target = getEditableTextTarget();
+    if (!target) {
+      return null;
+    }
+    ensureTextUiBound(target);
+    lastTextObjectRef.current = target;
+
+    textCanvas.setActiveObject(target);
+    if (!target.isEditing) {
+      target.enterEditing();
+    }
+    target.hiddenTextarea?.focus();
+    if (target.isEditing) {
+      setTextEditingVisuals(target);
+    }
+    textCanvas.requestRenderAll();
+    return target;
+  };
+
   /**
    * Смена кегля через `setSelectionStyles` (Fabric): выделение — на весь range;
    * свернутый курсор — стиль в точке [s, s+1) для след. ввода. Затем `initDimensions` и сохранение
@@ -744,18 +791,20 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     setTextFontSize(next);
     textFontSizeRef.current = next;
 
+    setIsImageDeleteMode(false);
+    isImageDeleteModeRef.current = false;
+    activeToolRef.current = "text";
+    setActiveTool("text");
+
     const textCanvas = textCanvasRef.current;
     if (!textCanvas) {
       return;
     }
-    const active = textCanvas.getActiveObject();
-    if (!active) {
+
+    const t = autoEnterTextEditing();
+    if (!t) {
       return;
     }
-    if (!(active instanceof fabric.IText) && !(active instanceof fabric.Textbox)) {
-      return;
-    }
-    const t = active as EditableTextObject;
 
     if (t.isEditing) {
       t.setSelectionStyles({ fontSize: next });
@@ -1799,56 +1848,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     } catch {
       // ignore
     }
-  };
-
-  const editExistingText = () => {
-    setIsImageDeleteMode(false);
-    isImageDeleteModeRef.current = false;
-    activeToolRef.current = "text";
-    setActiveTool("text");
-
-    const textCanvas = textCanvasRef.current;
-    if (!textCanvas) {
-      return;
-    }
-
-    const candidate =
-      (lastTextObjectRef.current && textCanvas.getObjects().includes(lastTextObjectRef.current)
-        ? lastTextObjectRef.current
-        : null) ??
-      (textCanvas
-        .getObjects()
-        .filter(
-          (o): o is EditableTextObject => o instanceof fabric.IText || o instanceof fabric.Textbox,
-        )
-        .at(-1) ?? null);
-
-    if (!candidate) {
-      return;
-    }
-
-    ensureTextUiBound(candidate);
-    const t = candidate;
-
-    textCanvas.setActiveObject(t);
-    const len = typeof t.text === "string" ? t.text.length : 0;
-    t.enterEditing();
-    try {
-      t.hiddenTextarea?.setSelectionRange(len, len);
-    } catch {
-      // ignore
-    }
-    t.setSelectionStyles({ fontSize: textFontSizeRef.current });
-    t.hiddenTextarea?.focus();
-
-    if (t.isEditing) {
-      setTextEditingVisuals(t);
-    }
-    t.initDimensions();
-    textCanvas.requestRenderAll();
-    recalcDocumentHeightRef.current?.();
-    void persistFabricObject("text", t);
-    requestSaveRef.current?.();
   };
 
   const openFileDialog = () => {

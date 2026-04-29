@@ -908,7 +908,7 @@ export default function StudioConsole({
         <button
           type="button"
           onClick={onEraser}
-          className={`${toolButtonBase} ml-0.5 h-6 w-6 ${isEraserActive ? toolButtonActive : toolButtonInactive}`}
+          className={`${toolButtonBase} h-6 w-6 ${isEraserActive ? toolButtonActive : toolButtonInactive}`}
           title={t("eraser.aria")}
           aria-pressed={isEraserActive}
           aria-label={t("eraser.aria")}
@@ -1014,7 +1014,7 @@ export default function StudioConsole({
         <button
           type="button"
           onClick={onEraser}
-          className={`${toolButtonBase} ml-0.5 h-6 w-6 ${
+          className={`${toolButtonBase} h-6 w-6 ${
             isEraserActive ? toolButtonActive : toolButtonInactive
           }`}
           title={t("eraser.aria")}
@@ -1073,7 +1073,7 @@ export default function StudioConsole({
             type="button"
             onClick={onAddText}
             className={cn(
-              "ml-0.5 flex h-6 w-6 items-center justify-center border-0 p-0 outline-none transition",
+              "flex h-6 w-6 items-center justify-center border-0 p-0 outline-none transition",
               toolTypeClass,
               activeTool === "text" ? toolButtonActive : `rounded-md ${toolButtonInactive}`,
               "rounded-md",
