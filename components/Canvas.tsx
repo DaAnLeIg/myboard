@@ -2151,7 +2151,6 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
           handleFontSizeChange(px);
         }}
         onAddText={addText}
-        onEditText={editExistingText}
         onAddImage={() => {
           clearTextEditingVisuals();
           openFileDialog();

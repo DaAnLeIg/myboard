@@ -96,7 +96,6 @@ type StudioConsoleProps = {
   onEraser: () => void;
   onTextSize: (px: TextSizeOption) => void;
   onAddText: () => void;
-  onEditText: () => void;
   onAddImage: () => void;
   onToggleImageDelete: () => void;
   onSaveToDatabase: (name: string) => void | Promise<void>;
@@ -135,7 +134,6 @@ export default function StudioConsole({
   onEraser,
   onTextSize,
   onAddText,
-  onEditText,
   onAddImage,
   onToggleImageDelete,
   onSaveToDatabase,
@@ -1085,19 +1083,6 @@ export default function StudioConsole({
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
           </button>
-          <button
-            type="button"
-            onClick={onEditText}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center border-0 p-0 outline-none transition",
-              toolTypeClass,
-              activeTool === "text" ? toolButtonActive : `rounded-md ${toolButtonInactive}`,
-            )}
-            title={t("text.editExisting")}
-            aria-label={t("text.editExisting")}
-          >
-            <Type className="h-3.5 w-3.5" strokeWidth={ICON} aria-hidden />
-          </button>
         </div>
       </div>
 
@@ -1281,13 +1266,6 @@ export default function StudioConsole({
             <div className="flex w-full flex-wrap items-center gap-1.5" role="toolbar" aria-label={t("mobile.tools")}>
               {toolbarContent}
               <button type="button" onClick={onAddText} className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}><Type className="h-4 w-4" strokeWidth={ICON} /></button>
-              <button
-                type="button"
-                onClick={onEditText}
-                className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}
-              >
-                <Type className="h-4 w-4" strokeWidth={ICON} />
-              </button>
               <button type="button" onClick={onAddImage} className={`${toolButtonBase} h-8 w-8 rounded-md ${toolButtonInactive}`}><ImageIcon className="h-4 w-4" strokeWidth={ICON} /></button>
               <button
                 type="button"
