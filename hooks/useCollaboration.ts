@@ -440,18 +440,7 @@ export async function upsertObjectOnCanvas(
     if (isFabricTextType(data.type as string | undefined)) {
       const text = typeof (data as { text?: unknown }).text === "string" ? (data as { text: string }).text : "";
       const shouldForceEdit = incomingForceEdit && !existing;
-      const isIText = data.type === "IText" || data.type === "i-text";
-      const box = isIText
-        ? new IText(text, {
-            ...pickTransform(data),
-            width: (data as { width?: number }).width ?? 320,
-            fontSize: (data as { fontSize?: number }).fontSize,
-            fontFamily: (data as { fontFamily?: string }).fontFamily,
-            fill: (data as { fill?: unknown }).fill as string | undefined,
-            editable: true,
-            objectCaching: false,
-          })
-        : new Textbox(text, {
+      const box = new Textbox(text, {
         ...pickTransform(data),
         width: (data as { width?: number }).width ?? 320,
         fontSize: (data as { fontSize?: number }).fontSize,
@@ -459,6 +448,7 @@ export async function upsertObjectOnCanvas(
         fill: (data as { fill?: unknown }).fill as string | undefined,
         editable: true,
         objectCaching: false,
+        splitByGrapheme: true,
       });
       if (collabId) {
         (box as FabricObject & { set: (k: string, v: string) => void }).set(COLLAB_ID_KEY, collabId);

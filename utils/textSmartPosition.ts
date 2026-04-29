@@ -19,7 +19,7 @@ export function getSmartPosition(
   },
 ): SmartTextPosition {
   // Простой алгоритм из ТЗ:
-  // 1) берём последний i-text на textCanvas
+  // 1) берём последний текстовый объект на textCanvas
   // 2) пробуем разместить справа
   // 3) если не влезает — переносим ниже.
   const gapPx = opts?.gapPx ?? DEFAULT_GAP_PX;
@@ -28,16 +28,24 @@ export function getSmartPosition(
 
   const canvasWidth = textCanvas.getWidth();
 
-  const iTextObjects = textCanvas
+  const textObjects = textCanvas
     .getObjects()
-    .filter((o): o is IText => o instanceof fabric.IText || o.type === "i-text" || o.type === "IText")
+    .filter(
+      (o): o is IText | Textbox =>
+        o instanceof fabric.IText ||
+        o instanceof fabric.Textbox ||
+        o.type === "i-text" ||
+        o.type === "IText" ||
+        o.type === "textbox" ||
+        o.type === "TextBox",
+    )
     .filter((o) => o.visible !== false);
 
-  if (iTextObjects.length === 0) {
+  if (textObjects.length === 0) {
     return { left: 50, top: 50 };
   }
 
-  const lastObj = iTextObjects[iTextObjects.length - 1];
+  const lastObj = textObjects[textObjects.length - 1];
 
   // Важно вызвать initDimensions до измерений (особенно для пустого текста).
   const baseLeft = typeof newObject.left === "number" ? newObject.left : leftMarginPx;

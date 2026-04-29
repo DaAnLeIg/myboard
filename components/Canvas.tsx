@@ -79,6 +79,8 @@ type FabricWithEraser = typeof fabric & {
 };
 
 const TEXT_HORIZONTAL_PADDING = 14;
+const TEXT_MIN_LEFT = 20;
+const TEXT_RIGHT_GUTTER = 16;
 const DEFAULT_PENCIL_COLOR = "#000000";
 const DEFAULT_PENCIL_WIDTH = 3 as const;
 const DEFAULT_TEXT_SIZE: TextSizeOption = 14;
@@ -154,6 +156,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
   const textCanvasRef = useRef<fabric.Canvas | null>(null);
   const drawCanvasRef = useRef<fabric.Canvas | null>(null);
   const lastTextObjectRef = useRef<EditableTextObject | null>(null);
+  const lastTextClickPointRef = useRef<{ x: number; y: number } | null>(null);
+  const lastTextClickTargetRef = useRef<EditableTextObject | null>(null);
   const lastInsertedImageRef = useRef<fabric.FabricImage | null>(null);
   const recalcDocumentHeightRef = useRef<(() => void) | null>(null);
   const requestSaveRef = useRef<(() => void) | null>(null);
@@ -770,6 +774,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     if (!target.isEditing) {
       target.enterEditing();
     }
+    try {
+      const len = typeof target.text === "string" ? target.text.length : 0;
+      target.hiddenTextarea?.setSelectionRange(len, len);
+    } catch {
+      // ignore
+    }
     target.hiddenTextarea?.focus();
     if (target.isEditing) {
       setTextEditingVisuals(target);
@@ -808,14 +818,10 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     if (t.isEditing) {
       t.setSelectionStyles({ fontSize: next });
+      // Базовый размер только для будущих символов, без set('fontSize') на весь блок.
+      t.fontSize = next;
     } else {
-      const s = t.selectionStart ?? 0;
-      const e = t.selectionEnd ?? s;
-      if (e > s) {
-        t.setSelectionStyles({ fontSize: next }, s, e);
-      } else {
-        t.setSelectionStyles({ fontSize: next }, s, s + 1);
-      }
+      t.set("fontSize", next);
     }
     t.initDimensions();
     if (t.isEditing) {
@@ -1199,6 +1205,51 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       return maxBottom;
     };
 
+    const clampTextObjectToDocumentBounds = (obj: fabric.Object | null | undefined) => {
+      if (!(obj instanceof fabric.IText) && !(obj instanceof fabric.Textbox)) {
+        return;
+      }
+
+      const docWidth = imgCanvas.getWidth();
+      const docHeight = imgCanvas.getHeight();
+      let left = typeof obj.left === "number" ? obj.left : TEXT_MIN_LEFT;
+      let top = typeof obj.top === "number" ? obj.top : 16;
+      left = Math.max(TEXT_MIN_LEFT, left);
+      top = Math.max(16, top);
+
+      if (obj instanceof fabric.Textbox) {
+        const maxWidth = Math.max(120, Math.floor(docWidth - left - TEXT_RIGHT_GUTTER));
+        const currentWidth = typeof obj.width === "number" ? obj.width : maxWidth;
+        if (currentWidth > maxWidth) {
+          obj.set({ width: maxWidth });
+          obj.initDimensions();
+        }
+      }
+
+      const rightEdge = docWidth - TEXT_RIGHT_GUTTER;
+      if (left + obj.getScaledWidth() > rightEdge) {
+        if (obj instanceof fabric.Textbox) {
+          const fitWidth = Math.max(120, Math.floor(rightEdge - left));
+          const currentWidth = typeof obj.width === "number" ? obj.width : fitWidth;
+          if (currentWidth > fitWidth) {
+            obj.set({ width: fitWidth });
+            obj.initDimensions();
+          }
+        }
+        if (left + obj.getScaledWidth() > rightEdge) {
+          left = Math.max(TEXT_MIN_LEFT, rightEdge - obj.getScaledWidth());
+        }
+      }
+
+      const maxTop = Math.max(16, docHeight - obj.getScaledHeight() - 16);
+      if (top > maxTop) {
+        top = maxTop;
+      }
+
+      obj.set({ left, top });
+      obj.setCoords();
+    };
+
     const recalcDocumentHeight = (forcedWidth?: number) => {
       const measuredWidth = boardContainerRef.current?.clientWidth ?? 0;
       const preferredWidth = forcedWidth ?? measuredWidth;
@@ -1214,7 +1265,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       );
 
       imgCanvas.setDimensions({ width, height: nextHeight });
-      textCanvas.setDimensions({ width, height: nextHeight });
+      // Текстовый слой всегда равен размеру документа (фоновому слою).
+      textCanvas.setDimensions({ width: imgCanvas.getWidth(), height: imgCanvas.getHeight() });
       drawCanvas.setDimensions({ width, height: nextHeight });
       imgCanvas.renderAll();
       textCanvas.renderAll();
@@ -1304,6 +1356,16 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       if (isImageDeleteModeRef.current) {
         return;
       }
+      if (activeToolRef.current === "text") {
+        const p = textCanvas.getScenePoint(event.e);
+        lastTextClickPointRef.current = { x: p.x, y: p.y };
+        const hit = textCanvas.findTarget(event.e);
+        if (hit instanceof fabric.IText || hit instanceof fabric.Textbox) {
+          lastTextClickTargetRef.current = hit;
+        } else {
+          lastTextClickTargetRef.current = null;
+        }
+      }
       if (activeToolRef.current !== "text") {
         if (!event.target) {
           clearTextEditingVisuals();
@@ -1325,10 +1387,14 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       }
       clearTextEditingVisuals();
       const p = textCanvas.getScenePoint(event.e);
-      const maxWidth = Math.max(180, Math.floor(textCanvas.getWidth() * 0.8));
+      const leftCandidate = Math.max(TEXT_MIN_LEFT, p.x);
+      const maxWidth = Math.max(
+        120,
+        Math.floor(textCanvas.getWidth() - leftCandidate - TEXT_RIGHT_GUTTER),
+      );
       const size = textFontSizeRef.current;
-      const newText = new fabric.IText("", {
-        left: Math.max(16, p.x),
+      const newText = new fabric.Textbox("", {
+        left: leftCandidate,
         top: Math.max(16, p.y),
         width: maxWidth,
         fontFamily: "Arial",
@@ -1336,6 +1402,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         fill: "#000000",
         editable: true,
         objectCaching: false,
+        splitByGrapheme: true,
         backgroundColor: "rgba(255,255,255,0.25)",
         padding: TEXT_HORIZONTAL_PADDING,
         borderColor: "rgba(255, 80, 80, 0.35)",
@@ -1344,7 +1411,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         selectionColor: "rgba(255, 80, 80, 0.15)",
       });
       const smartPos = getSmartPosition(textCanvas, newText);
-      newText.set({ left: smartPos.left, top: smartPos.top });
+      const wrappedWidth = Math.max(
+        120,
+        Math.floor(textCanvas.getWidth() - smartPos.left - TEXT_RIGHT_GUTTER),
+      );
+      newText.set({ left: smartPos.left, top: smartPos.top, width: wrappedWidth });
+      clampTextObjectToDocumentBounds(newText);
       setTextIdleVisuals(newText);
       bindITextSizeOnTextChange(newText);
       newText.on("editing:entered", () => {
@@ -1374,6 +1446,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     drawCanvas.on("mouse:down", handleTextPointer);
     textCanvas.on("mouse:down", handleTextPointer);
+    const onTextTransform = (event: { target?: fabric.Object | null }) => {
+      clampTextObjectToDocumentBounds((event.target as fabric.Object | null) ?? null);
+      textCanvas.requestRenderAll();
+    };
+    textCanvas.on("object:moving", onTextTransform);
+    textCanvas.on("object:modified", onTextTransform);
 
     textCanvas.on("mouse:dblclick", (event) => {
       if (!(event.target instanceof fabric.IText) && !(event.target instanceof fabric.Textbox)) {
@@ -1477,6 +1555,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
       }
+      textCanvas.off("object:moving", onTextTransform);
+      textCanvas.off("object:modified", onTextTransform);
       imgCanvas.dispose();
       textCanvas.dispose();
       drawCanvas.dispose();
@@ -1814,26 +1894,75 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     textCanvas.defaultCursor = "text";
 
     const canvasWidth = textCanvas.getWidth();
-    const baseLeft = Math.max(20, canvasWidth * 0.1);
+    const baseLeft = Math.max(TEXT_MIN_LEFT, canvasWidth * 0.1);
     const baseTop = 48;
-    const width = Math.max(180, Math.floor(canvasWidth * 0.8));
+    let nextLeft = baseLeft;
+    let nextTop = baseTop;
 
-    const newText = new fabric.IText("Начните печатать...", {
-      left: baseLeft,
-      top: baseTop,
+    const clickPoint = lastTextClickPointRef.current;
+    if (clickPoint) {
+      nextLeft = Math.max(16, clickPoint.x);
+      nextTop = Math.max(16, clickPoint.y);
+    }
+
+    const targetAtClick =
+      lastTextClickTargetRef.current &&
+      textCanvas.getObjects().includes(lastTextClickTargetRef.current)
+        ? lastTextClickTargetRef.current
+        : null;
+    if (targetAtClick) {
+      const targetLeft = targetAtClick.left ?? nextLeft;
+      const targetTop = targetAtClick.top ?? nextTop;
+      const targetWidth = targetAtClick.getScaledWidth();
+      const shiftedRight = targetLeft + targetWidth + 20;
+      if (shiftedRight + 120 <= canvasWidth - TEXT_RIGHT_GUTTER) {
+        nextLeft = shiftedRight;
+        nextTop = targetTop;
+      } else {
+        nextLeft = TEXT_MIN_LEFT;
+        nextTop = targetTop + targetAtClick.getScaledHeight() + 20;
+      }
+    }
+
+    nextLeft = Math.max(TEXT_MIN_LEFT, nextLeft);
+    const maxTop = Math.max(16, textCanvas.getHeight() - 40);
+    nextTop = Math.min(Math.max(16, nextTop), maxTop);
+
+    const width = Math.max(120, Math.floor(canvasWidth - nextLeft - TEXT_RIGHT_GUTTER));
+
+    const newText = new fabric.Textbox("Начните печатать...", {
+      left: nextLeft,
+      top: nextTop,
       width,
       fontFamily: "Arial",
       fontSize: DEFAULT_TEXT_SIZE,
       fill: "#000000",
       editable: true,
       objectCaching: false,
+      splitByGrapheme: true,
     });
 
     // Чтобы остальные участники могли открыть редактирование сразу после INSERT.
     (newText as fabric.Object & { set: (k: string, v: boolean) => void }).set(FORCE_EDIT_KEY, true);
 
-    const smartPos = getSmartPosition(textCanvas, newText);
-    newText.set({ left: smartPos.left, top: smartPos.top });
+    if (!clickPoint) {
+      const smartPos = getSmartPosition(textCanvas, newText);
+      const wrappedWidth = Math.max(
+        120,
+        Math.floor(canvasWidth - smartPos.left - TEXT_RIGHT_GUTTER),
+      );
+      newText.set({ left: smartPos.left, top: smartPos.top, width: wrappedWidth });
+    }
+    {
+      let safeLeft = typeof newText.left === "number" ? newText.left : TEXT_MIN_LEFT;
+      let safeTop = typeof newText.top === "number" ? newText.top : 16;
+      safeLeft = Math.max(TEXT_MIN_LEFT, safeLeft);
+      safeTop = Math.min(Math.max(16, safeTop), Math.max(16, textCanvas.getHeight() - 40));
+      const maxWidth = Math.max(120, Math.floor(canvasWidth - safeLeft - TEXT_RIGHT_GUTTER));
+      const currentWidth = typeof newText.width === "number" ? newText.width : maxWidth;
+      newText.set({ left: safeLeft, top: safeTop, width: Math.min(currentWidth, maxWidth) });
+      newText.initDimensions();
+    }
 
     ensureTextUiBound(newText);
     lastTextObjectRef.current = newText;
