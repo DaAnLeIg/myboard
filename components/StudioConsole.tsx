@@ -230,10 +230,10 @@ export default function StudioConsole({
   const toolTypeClass = dark ? "text-zinc-100" : ivory ? "text-stone-900" : "text-zinc-900";
 
   const swatchSelectedRing = dark
-    ? "ring-1 ring-inset ring-zinc-200 ring-offset-0"
+    ? "ring-2 ring-inset ring-zinc-100 scale-110"
     : ivory
-      ? "ring-1 ring-inset ring-stone-600/60 ring-offset-0"
-      : "ring-1 ring-inset ring-zinc-800 ring-offset-0";
+      ? "ring-2 ring-inset ring-stone-700/70 scale-110"
+      : "ring-2 ring-inset ring-zinc-900 scale-110";
 
   const imageDeleteActive = dark
     ? "bg-red-950/50 text-red-300 hover:bg-red-950/70"
@@ -896,6 +896,12 @@ export default function StudioConsole({
                 className={cn(
                   "h-2 w-2 border-0 p-0 transition rounded-sm",
                   selected ? swatchSelectedRing : "ring-0 hover:opacity-90",
+                  sw.key === "white" &&
+                    (dark
+                      ? "ring-1 ring-inset ring-zinc-500"
+                      : ivory
+                        ? "ring-1 ring-inset ring-stone-400"
+                        : "ring-1 ring-inset ring-zinc-300"),
                 )}
                 style={{ backgroundColor: sw.color }}
                 title={t("pencil.swatch", { c: cname })}
@@ -1002,6 +1008,12 @@ export default function StudioConsole({
                 className={cn(
                   "h-2 w-2 border-0 p-0 transition rounded-sm",
                   selected ? swatchSelectedRing : "ring-0 hover:opacity-90",
+                  sw.key === "white" &&
+                    (dark
+                      ? "ring-1 ring-inset ring-zinc-500"
+                      : ivory
+                        ? "ring-1 ring-inset ring-stone-400"
+                        : "ring-1 ring-inset ring-zinc-300"),
                 )}
                 style={{ backgroundColor: sw.color }}
                 title={t("pencil.swatch", { c: cname })}

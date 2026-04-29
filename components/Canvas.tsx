@@ -80,8 +80,9 @@ type FabricWithEraser = typeof fabric & {
 
 const TEXT_HORIZONTAL_PADDING = 14;
 const TEXT_MIN_LEFT = 20;
-const TEXT_RIGHT_GUTTER = 16;
-const DEFAULT_PENCIL_COLOR = "#000000";
+const TEXT_RIGHT_GUTTER = 20;
+const TEXT_MIN_TOP = 20;
+const DEFAULT_PENCIL_COLOR = "#0000FF";
 const DEFAULT_PENCIL_WIDTH = 3 as const;
 const DEFAULT_TEXT_SIZE: TextSizeOption = 14;
 const FORCE_EDIT_KEY = "mbForceEdit";
@@ -1213,9 +1214,9 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       const docWidth = imgCanvas.getWidth();
       const docHeight = imgCanvas.getHeight();
       let left = typeof obj.left === "number" ? obj.left : TEXT_MIN_LEFT;
-      let top = typeof obj.top === "number" ? obj.top : 16;
+      let top = typeof obj.top === "number" ? obj.top : TEXT_MIN_TOP;
       left = Math.max(TEXT_MIN_LEFT, left);
-      top = Math.max(16, top);
+      top = Math.max(TEXT_MIN_TOP, top);
 
       if (obj instanceof fabric.Textbox) {
         const maxWidth = Math.max(120, Math.floor(docWidth - left - TEXT_RIGHT_GUTTER));
@@ -1241,7 +1242,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         }
       }
 
-      const maxTop = Math.max(16, docHeight - obj.getScaledHeight() - 16);
+      const maxTop = Math.max(TEXT_MIN_TOP, docHeight - obj.getScaledHeight() - TEXT_MIN_TOP);
       if (top > maxTop) {
         top = maxTop;
       }
@@ -1357,7 +1358,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         return;
       }
       if (activeToolRef.current === "text") {
-        const p = textCanvas.getScenePoint(event.e);
+        const p = textCanvas.getPointer(event.e);
         lastTextClickPointRef.current = { x: p.x, y: p.y };
         const hit = textCanvas.findTarget(event.e);
         if (hit instanceof fabric.IText || hit instanceof fabric.Textbox) {
@@ -1386,7 +1387,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
         return;
       }
       clearTextEditingVisuals();
-      const p = textCanvas.getScenePoint(event.e);
+      const p = textCanvas.getPointer(event.e);
       const leftCandidate = Math.max(TEXT_MIN_LEFT, p.x);
       const maxWidth = Math.max(
         120,
@@ -1395,7 +1396,7 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       const size = textFontSizeRef.current;
       const newText = new fabric.Textbox("", {
         left: leftCandidate,
-        top: Math.max(16, p.y),
+        top: Math.max(TEXT_MIN_TOP, p.y),
         width: maxWidth,
         fontFamily: "Arial",
         fontSize: size,
@@ -1901,8 +1902,8 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
 
     const clickPoint = lastTextClickPointRef.current;
     if (clickPoint) {
-      nextLeft = Math.max(16, clickPoint.x);
-      nextTop = Math.max(16, clickPoint.y);
+      nextLeft = Math.max(TEXT_MIN_LEFT, clickPoint.x);
+      nextTop = Math.max(TEXT_MIN_TOP, clickPoint.y);
     }
 
     const targetAtClick =
@@ -1924,9 +1925,23 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
       }
     }
 
+    const canvasHeight = textCanvas.getHeight();
     nextLeft = Math.max(TEXT_MIN_LEFT, nextLeft);
-    const maxTop = Math.max(16, textCanvas.getHeight() - 40);
-    nextTop = Math.min(Math.max(16, nextTop), maxTop);
+    const maxTop = Math.max(TEXT_MIN_TOP, canvasHeight - 40);
+    nextTop = Math.min(Math.max(TEXT_MIN_TOP, nextTop), maxTop);
+
+    // Клик рядом с правым краем: сначала пробуем сдвиг влево, иначе перенос вниз к левому краю.
+    const minTextboxWidth = 120;
+    const rightBound = canvasWidth - TEXT_RIGHT_GUTTER;
+    if (nextLeft + minTextboxWidth > rightBound) {
+      const shiftedLeft = Math.max(TEXT_MIN_LEFT, rightBound - minTextboxWidth);
+      if (shiftedLeft + minTextboxWidth <= rightBound) {
+        nextLeft = shiftedLeft;
+      } else {
+        nextLeft = TEXT_MIN_LEFT;
+        nextTop = Math.min(maxTop, nextTop + 20);
+      }
+    }
 
     const width = Math.max(120, Math.floor(canvasWidth - nextLeft - TEXT_RIGHT_GUTTER));
 
@@ -1955,9 +1970,12 @@ export default function Canvas({ selectedDrawingId = null }: CanvasProps) {
     }
     {
       let safeLeft = typeof newText.left === "number" ? newText.left : TEXT_MIN_LEFT;
-      let safeTop = typeof newText.top === "number" ? newText.top : 16;
+      let safeTop = typeof newText.top === "number" ? newText.top : TEXT_MIN_TOP;
       safeLeft = Math.max(TEXT_MIN_LEFT, safeLeft);
-      safeTop = Math.min(Math.max(16, safeTop), Math.max(16, textCanvas.getHeight() - 40));
+      safeTop = Math.min(
+        Math.max(TEXT_MIN_TOP, safeTop),
+        Math.max(TEXT_MIN_TOP, textCanvas.getHeight() - 40),
+      );
       const maxWidth = Math.max(120, Math.floor(canvasWidth - safeLeft - TEXT_RIGHT_GUTTER));
       const currentWidth = typeof newText.width === "number" ? newText.width : maxWidth;
       newText.set({ left: safeLeft, top: safeTop, width: Math.min(currentWidth, maxWidth) });
